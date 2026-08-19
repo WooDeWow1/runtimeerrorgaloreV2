@@ -65,7 +65,7 @@ def admin_token():
 
 @pytest.fixture(scope="session")
 def customer():
-    email = f"trainer_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"trainer_{uuid.uuid4().hex[:8]}@gmail.com"
     password = "Trainer#2026"
     r = requests.post(f"{API}/auth/register", json={"email": email, "password": password, "name": "Trainer Test"})
     assert r.status_code == 200, r.text
@@ -75,7 +75,7 @@ def customer():
 
 @pytest.fixture(scope="session")
 def customer2():
-    email = f"trainer2_{uuid.uuid4().hex[:8]}@example.com"
+    email = f"trainer2_{uuid.uuid4().hex[:8]}@gmail.com"
     r = requests.post(f"{API}/auth/register", json={"email": email, "password": "Trainer#2026", "name": "T2"})
     assert r.status_code == 200
     data = r.json()
@@ -213,7 +213,7 @@ class TestCheckoutValidation:
         r = requests.post(f"{API}/orders/checkout", json={
             "items": [{"product_id": p["id"], "quantity": 1}],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
-            "email": "guest@example.com",
+            "email": "guest.pokecoins.test@gmail.com",
         })
         assert r.status_code == 400
         assert "Pok" in r.json()["detail"]

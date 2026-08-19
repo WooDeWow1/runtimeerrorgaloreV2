@@ -3,6 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { CheckCircle2, Loader2, Mail } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { OrderChat } from "@/components/OrderChat";
+import { ClaimAccountCard } from "@/components/ClaimAccountCard";
 
 export default function PaymentSuccess() {
   const [params] = useSearchParams();
@@ -10,8 +13,18 @@ export default function PaymentSuccess() {
   const payUrl = localStorage.getItem("pokeforge_checkout_url");
   const [state, setState] = useState("checking");
   const [orderId, setOrderId] = useState(null);
+  const [orderEmail, setOrderEmail] = useState("");
   const { clear } = useCart();
+  const { user } = useAuth();
   const cleared = useRef(false);
+
+  useEffect(() => {
+    if (!orderId) return;
+    api
+      .get(`/orders/${orderId}`)
+      .then(({ data }) => setOrderEmail(data.user_email || ""))
+      .catch(() => {});
+  }, [orderId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -98,6 +111,15 @@ export default function PaymentSuccess() {
           >
             Track order
           </Link>
+
+          <div className="mt-12 text-left">
+            <h2 className="mb-4 text-[11px] uppercase tracking-[0.25em] text-zinc-300">
+              Chat with support
+            </h2>
+            <OrderChat orderId={orderId} />
+          </div>
+
+          {!user && <ClaimAccountCard orderId={orderId} email={orderEmail} />}
         </>
       )}
       {state === "pending" && (
@@ -109,7 +131,7 @@ export default function PaymentSuccess() {
             link. Nothing else is needed from you — you can close this page.
           </p>
           <Link
-            to="/dashboard"
+            to="/my-orders"
             className="mt-8 inline-block border border-zinc-700 px-8 py-3 text-[11px] uppercase tracking-[0.3em] text-zinc-300 hover:border-white hover:text-white"
           >
             My orders

@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 13 end-to-end verification of Order Confirmation Chat, post-purchase claim-account, /my-orders dashboard, 3s chat polling and 10s notification bell + support-reply email. New backend suite /app/backend/tests/test_claim_chat_v5.py: 14/14 passed (session lookup, guest chat, admin reply, claim-order happy path + security, notifications, order scoping). Regressions: backend_test.py 88/89 (1 flaky), test_coupons_v2.py 21/21, test_coming_soon_v3.py 14/14 serial, test_auth_playbook_v2.py 9/11 (both failures = known ingress-IP lockout keying). Browser: /payment/success for a PAID session shows 'Payment confirmed' + Track Order + order-chat + claim-account-card with read-only pre-filled checkout email; guest posted a message (sender_role customer) and an admin reply posted out-of-band appeared in ~1-2s with NO reload; claim flow created the account, logged in, redirected to /my-orders where the order row, open-chat toggle (3 msg history) and details link all work; notification bell badge appeared ~1s after an admin reply, panel showed 'New message from support' and cleared to 0 on open; guest /my-orders reads localStorage orders and can post; order-detail chat and Admin console chat work both directions; /dashboard renders my-orders-page; nav-my-orders + mobile-nav-my-orders present. Guest support-reply email confirmed delivered (202 Accepted to delivered@resend.dev); fake addresses return the expected 422 'undeliverable recipient'. All test data created was deleted.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/claim-order", "issue": "Order adoption query is case-sensitive: it lowercases order.user_email then matches {user_email: <lower>}. Any order stored with mixed-case email (only /orders/checkout lowercases today) creates the account but returns orders_claimed=0, silently orphaning the order the buyer just claimed. Use a case-insensitive match or normalise user_email on write."},
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout is keyed on '<client.host>:<email>'; behind the ingress the client IP rotates, so lockout fired on attempt 9 (playbook expects 5 fails) and a successful login only clears the counter for the current IP (test_auth_playbook_v2 TestBruteForceLockout x2 fail). Key on email only or trust X-Forwarded-For."},
+      {"endpoint": "internal emailer", "issue": "Still no retry/backoff; support-reply/tracking sends fail silently on provider 422/429 with only an ERROR log (pre-existing, carried from iteration 12)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "OrderChat / NotificationBell polling", "issue": "Both components swallow fetch errors in empty catch blocks with no loading/error state. A 403/500 renders the misleading 'No messages yet. Ask us anything about this order.' — seen briefly right after the claim redirect before the next 3s poll succeeded. Add an error state (e.g. 'Could not load messages, retrying…').", "affected_selectors": ["[data-testid=\"order-chat\"]"]},
+      {"flow": "/my-orders status buckets", "issue": "MyOrders only renders statuses in ['pending','processing','awaiting_payment'] (Active) and ['completed','cancelled'] (History). Any other/future status silently disappears from the page — add an 'Other' bucket or render the remainder.", "affected_selectors": ["[data-testid=\"my-orders-page\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_claim_chat_v5.py",
+    "/app/test_reports/pytest/it13_claim.xml",
+    "/app/test_reports/pytest/it13_backend.xml",
+    "/app/test_reports/pytest/it13_coupons.xml",
+    "/app/test_reports/pytest/it13_cs.xml",
+    "/app/test_reports/pytest/it13_auth.xml"
+  ],
+  "action_items": [
+    "Make claim-order's order adoption email match case-insensitive (or lowercase user_email at write time) so orders_claimed can never be 0 for the order being claimed.",
+    "Re-key the login lockout on email (or X-Forwarded-For) so 5 failures actually lock, per the auth playbook.",
+    "Add visible error/loading state to OrderChat (and NotificationBell) instead of silently showing 'No messages yet' when the fetch fails.",
+    "Render orders whose status is outside the two hardcoded buckets on /my-orders.",
+    "Optional: retry/backoff around emailer sends."
+  ],
+  "critical_code_review_comments": [
+    "server.py claim_order: {'user_email': email} exact match after .lower() — case sensitivity bug described above; also consider wrapping user insert + orders update in error handling so a failed update_many does not leave an account with zero linked orders.",
+    "MyOrders guest branch fires an unbounded Promise.all over every id in localStorage 'pokeforge_guest_orders'; cap it (e.g. last 20) and drop ids that 403/404 so a claimed-then-logged-out device does not spam the API.",
+    "PaymentSuccess.jsx makes a separate GET /orders/{id} just for the email; the session endpoint could return the email and save a round trip.",
+    "post_message sends the support email inline in the request path (await send_email) — a slow provider directly slows the admin's reply; move to a background task.",
+    "server.py is 1067 lines; the messaging/notification and auth sections are natural split points."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_claim_chat_v5.py (new, 14 tests)",
+    "/app/backend/tests/backend_test.py (test-only: customer/customer2/guest fixture emails moved off @example.com — SellAuth now rejects it with 422 'The email must be a valid email address', which was failing 4 checkout tests for non-app reasons)",
+    "/app/scripts/seed_test_order.py (new helper: prints JSON session_id/order_id/email)",
+    "/app/scripts/cleanup_test_data.py (new: purges test-it13 orders/users/messages/sessions/notifications)",
+    "/app/scripts/delete_orders_by_id.py (new)"
+  ],
+  "success_rate": {"backend": "100% of in-scope new tests (14/14); regressions 88/89 backend_test (1 flaky), 21/21 coupons, 14/14 coming-soon serial, 9/11 auth playbook (known lockout keying)", "frontend": "100% (all 20 browser assertions passed)"},
+  "seed_data_creation": "Paid guest orders/sessions seeded via /app/scripts/seed_test_order.py with emails test-it13+*@gmail.com plus one delivered@resend.dev order for the email check. ALL deleted afterwards (14 orders, 14 sessions, 6 users, 10 messages, 3 notifications + the resend order/session). Verified 0 remaining test-it13 docs; catalog untouched at 12 products.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md). Claimed customers are created per-run and deleted.",
+  "context_for_next_testing_agent": "Do NOT put the cleanup script in a pytest fixture — pytest.ini runs 2 xdist workers and a per-worker teardown deletes the other worker's live orders (this produced 5 false failures before I moved cleanup out). Run 'python3 /app/scripts/cleanup_test_data.py' after the suite instead. Also: httpOnly auth cookies leak between requests when using a shared requests.Session, which makes 'anonymous' assertions fail (looks like a 403->200 bug but is not) — test_claim_chat_v5.py uses a cookie-less Anon client for this reason. Seed paid orders with /app/scripts/seed_test_order.py [email] (lowercase emails only, see the claim case-sensitivity bug). test_coming_soon_v3.py must be run with -n 0; its checkout-guard test races with the class that toggles coming_soon flags. Known flaky: backend_test.py::TestCouponExclusions::test_product_id_exclusion (~1 in 2 full runs under xdist, passes isolated).",
+  "rca_of_the_issue": "No functional defect found in the iteration-13 feature set. The claim-order orders_claimed=0 case I hit was reproduced with a mixed-case order email: claim_order lowercases order['user_email'] and then queries orders with that lowercased string, so mixed-case docs never match. Real checkout lowercases the email (server.py line 518) so production flows are unaffected, but the code path is fragile. The two auth-playbook lockout failures reproduce serially and stem from keying login_attempts on the ingress client IP, which rotates across proxy pods."
+}

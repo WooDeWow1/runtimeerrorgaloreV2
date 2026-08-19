@@ -80,6 +80,20 @@ production — run it after adding products, since ids differ per database.
 - The Emergent email proxy returns 422 `undeliverable_recipient` for fake test addresses
   (use delivered@resend.dev for tests). Real addresses deliver fine; emailer now logs the body.
 
+## Customer chat, accounts & dashboard (2026-06)
+- `/payment/success` now shows the live order chat plus a "Create account to track order" card
+  (`ClaimAccountCard`) for anonymous buyers.
+- `POST /api/auth/claim-order` {order_id, password}: email is taken from the ORDER (never the
+  caller), refuses orders that already have a user_id or an email that already has an account,
+  and adopts every unclaimed order with that email (case-insensitive match).
+- `/my-orders` (`MyOrders.jsx`, also served at `/dashboard`; `Dashboard.jsx` deleted) lists orders
+  with an inline Open Chat toggle per order. Guest ids come from `pokeforge_guest_orders`
+  localStorage, capped at 20 and pruned when unreadable.
+- Polling: OrderChat 3s, NotificationBell 10s (no websockets, by user's choice).
+- Admin replies notify account holders in-app AND email the buyer (`support_reply_html`), using
+  `order.origin_url` which is now persisted on the order.
+- Login lockout is keyed on the forwarded client IP (`client_ip`) so 5 failures actually lock.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

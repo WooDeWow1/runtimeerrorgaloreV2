@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -24,6 +25,7 @@ from models import (  # noqa: E402
     CATEGORIES,
     ORDER_STATUSES,
     CheckoutRequest,
+    ClaimOrderRequest,
     Coupon,
     CouponIn,
     CouponValidateRequest,
@@ -54,7 +56,7 @@ from security import (  # noqa: E402
     verify_password,
 )
 import sellauth  # noqa: E402
-from emailer import order_tracking_html, send_email  # noqa: E402
+from emailer import order_tracking_html, send_email, support_reply_html  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -152,11 +154,53 @@ async def register(payload: RegisterRequest, response: Response):
     }
 
 
+@api.post("/auth/claim-order")
+async def claim_order(payload: ClaimOrderRequest, response: Response):
+    """Create an account from a completed guest order and attach that buyer's orders to it."""
+    order = await db.orders.find_one({"_id": oid(payload.order_id)})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("user_id"):
+        raise HTTPException(status_code=400, detail="This order already belongs to an account")
+    email = order["user_email"].lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an account with this email — sign in to see this order.",
+        )
+    doc = {
+        "email": email,
+        "password_hash": hash_password(payload.password),
+        "name": payload.name.strip() or email.split("@")[0],
+        "role": "customer",
+        "created_at": utc_now(),
+    }
+    result = await db.users.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    user_id = str(result.inserted_id)
+    # Adopt every unclaimed order this buyer placed with the same email (case-insensitive,
+    # since older orders were not normalised on write).
+    claimed = await db.orders.update_many(
+        {
+            "user_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "$or": [{"user_id": ""}, {"user_id": {"$exists": False}}],
+        },
+        {"$set": {"user_id": user_id, "updated_at": utc_now()}},
+    )
+    set_auth_cookies(response, user_id, email, "customer")
+    return {
+        "user": public_user(doc),
+        "access_token": create_access_token(user_id, email, "customer"),
+        "orders_claimed": claimed.modified_count,
+    }
+
+
 @api.post("/auth/login")
 async def login(payload: LoginRequest, request: Request, response: Response):
     email = payload.email.lower()
-    ip = request.client.host if request.client else "unknown"
-    identifier = f"{ip}:{email}"
+    # Behind the ingress request.client.host is the pod IP and rotates, which let an
+    # attacker sidestep the lockout: key on the forwarded client IP instead.
+    identifier = f"{client_ip(request)}:{email}"
     attempt = await db.login_attempts.find_one({"identifier": identifier})
     if attempt and attempt.get("count", 0) >= 5:
         locked_until = attempt.get("locked_until")
@@ -551,6 +595,7 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     order = Order(
         user_id=session.get("user_id", ""),
         user_email=session["email"],
+        origin_url=session.get("origin_url", ""),
         items=[OrderItem(**i) for i in session["items"]],
         total=session["total"],
         subtotal=session.get("subtotal", session["total"]),
@@ -768,6 +813,18 @@ async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] =
     result = await db.messages.insert_one(msg.to_mongo())
     if role == "admin":
         await notify(order.get("user_id", ""), order_id, "New message from support", payload.body[:140])
+        # Guests have no bell, so email is the only way they hear back.
+        base = (order.get("origin_url") or "").rstrip("/")
+        if base.startswith("https://"):
+            await send_email(
+                to=order["user_email"],
+                subject=f"Reply from {os.environ['EMAIL_FROM_NAME']} support",
+                html=support_reply_html(
+                    order_id=order_id,
+                    body=payload.body,
+                    order_url=f"{base}/order/{order_id}",
+                ),
+            )
     msg.id = str(result.inserted_id)
     return msg.model_dump(by_alias=False)
 

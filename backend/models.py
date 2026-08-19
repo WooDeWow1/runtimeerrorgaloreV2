@@ -50,6 +50,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ClaimOrderRequest(BaseModel):
+    """Post-purchase signup: the email comes from the order, never from the caller."""
+    order_id: str
+    password: str = Field(min_length=6)
+    name: str = ""
+
+
 # ---------- Products ----------
 class ProductIn(BaseModel):
     name: str = Field(min_length=1)
@@ -120,6 +127,7 @@ class CheckoutRequest(BaseModel):
 class Order(BaseDocument):
     user_id: str = ""
     user_email: str
+    origin_url: str = ""
     items: List[OrderItem]
     total: float
     subtotal: Optional[float] = None

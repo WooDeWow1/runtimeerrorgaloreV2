@@ -7,20 +7,22 @@ export const OrderChat = ({ orderId }) => {
   const [messages, setMessages] = useState([]);
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const endRef = useRef(null);
 
   const load = async () => {
     try {
       const { data } = await api.get(`/orders/${orderId}/messages`);
       setMessages(data);
+      setLoadError(false);
     } catch {
-      /* ignore */
+      setLoadError(true);
     }
   };
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 10000);
+    const t = setInterval(load, 3000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
@@ -50,7 +52,12 @@ export const OrderChat = ({ orderId }) => {
         Order Channel
       </div>
       <div className="max-h-72 space-y-3 overflow-y-auto px-5 py-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && loadError && (
+          <p data-testid="chat-load-error" className="text-xs text-[#f4d03f]">
+            Could not load messages — retrying…
+          </p>
+        )}
+        {messages.length === 0 && !loadError && (
           <p className="text-xs text-zinc-500">No messages yet. Ask us anything about this order.</p>
         )}
         {messages.map((m) => (

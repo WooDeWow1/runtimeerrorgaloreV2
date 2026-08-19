@@ -113,6 +113,23 @@ async def send_email(*, to: str, subject: str, html: str) -> str | None:
         return None
 
 
+def support_reply_html(*, order_id: str, body: str, order_url: str) -> str:
+    brand = escape(os.environ["EMAIL_FROM_NAME"])
+    return (
+        '<table role="presentation" width="100%"><tr><td style="padding:24px;'
+        'font-family:Arial,sans-serif;color:#111">'
+        f"<h2 style=\"margin:0 0 12px\">New reply about order {escape(order_id[-8:])}</h2>"
+        f'<blockquote style="margin:0 0 16px;padding:12px 16px;border-left:3px solid #00ffcc;'
+        f'background:#f6f6f6;white-space:pre-wrap">{escape(body)}</blockquote>'
+        f'<p><a href="{escape(order_url)}" style="background:#00ffcc;color:#000;padding:12px 20px;'
+        'text-decoration:none;font-weight:bold;display:inline-block">Open order chat</a></p>'
+        f'<p style="font-size:12px;color:#555">Or open this link: {escape(order_url)}</p>'
+        f'<p style="font-size:12px;color:#888">Sent by {brand}. We never ask for your password or payment '
+        "details by email.</p>"
+        "</td></tr></table>"
+    )
+
+
 def order_tracking_html(*, order_id: str, tracking_url: str, total: float, item_lines: list[str]) -> str:
     brand = escape(os.environ["EMAIL_FROM_NAME"])
     items = "".join(f"<li>{escape(line)}</li>" for line in item_lines)

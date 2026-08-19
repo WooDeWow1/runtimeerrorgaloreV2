@@ -31,6 +31,7 @@ export const Navbar = () => {
           <Link to="/" className={linkCls} data-testid="nav-store">Store</Link>
           <Link to="/products" className={linkCls} data-testid="nav-products">Products</Link>
           <Link to="/about" className={linkCls} data-testid="nav-about">About Us</Link>
+          <Link to="/my-orders" className={linkCls} data-testid="nav-my-orders">My Orders</Link>
           <button onClick={() => setOpen(true)} className={linkCls} data-testid="nav-cart">
             Cart
           </button>
@@ -91,6 +92,14 @@ export const Navbar = () => {
           </Link>
           <Link to="/about" className={linkCls} data-testid="mobile-nav-about" onClick={() => setMobile(false)}>
             About Us
+          </Link>
+          <Link
+            to="/my-orders"
+            className={linkCls}
+            data-testid="mobile-nav-my-orders"
+            onClick={() => setMobile(false)}
+          >
+            My Orders
           </Link>
           <button
             className={`${linkCls} text-left`}

@@ -32,7 +32,7 @@ export default function OrderDetail() {
   return (
     <div data-testid="order-detail-page" className="mx-auto grid max-w-[1200px] gap-12 px-5 py-16 lg:grid-cols-12 lg:px-10 lg:py-24">
       <div className="lg:col-span-7">
-        <Link to="/dashboard" className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 hover:text-[#00ffcc]">
+        <Link to="/my-orders" className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 hover:text-[#00ffcc]">
           ← Back to orders
         </Link>
         <div className="mt-6 flex flex-wrap items-center gap-4">

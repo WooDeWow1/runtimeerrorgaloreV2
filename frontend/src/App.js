@@ -15,7 +15,7 @@ import Register from "@/pages/Register";
 import Checkout from "@/pages/Checkout";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
-import Dashboard from "@/pages/Dashboard";
+import MyOrders from "@/pages/MyOrders";
 import OrderDetail from "@/pages/OrderDetail";
 import Admin from "@/pages/Admin";
 
@@ -37,7 +37,8 @@ function App() {
               <Route path="/checkout" element={<Checkout />} />
               <Route path="/payment/success" element={<PaymentSuccess />} />
               <Route path="/payment/cancel" element={<PaymentCancel />} />
-              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard" element={<MyOrders />} />
+              <Route path="/my-orders" element={<MyOrders />} />
               <Route path="/orders/:id" element={<OrderDetail />} />
               <Route path="/order/:id" element={<OrderDetail />} />
               <Route
