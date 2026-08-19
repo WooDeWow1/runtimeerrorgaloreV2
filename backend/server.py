@@ -950,27 +950,37 @@ SEED_PRODUCTS = [
 
 @app.on_event("startup")
 async def startup():
+    # Index creation and seeding are writes: keep them non-fatal so the site stays live for
+    # browsing even when the database is read-only (e.g. Atlas DiskUseThresholdExceeded).
+    await ensure_indexes()
     try:
-        await ensure_indexes()
         await seed_data()
     except Exception as exc:
-        # Never let a database problem (e.g. Atlas write blocks) stop the app from booting.
-        logger.error("Startup database initialisation skipped: %s", exc)
+        logger.error("Startup seeding skipped (database not writable?): %s", exc)
+
+
+INDEXES = [
+    ("users", "email", {"unique": True}),
+    ("login_attempts", "identifier", {}),
+    ("orders", "user_id", {}),
+    ("messages", "order_id", {}),
+    ("notifications", "user_id", {}),
+    ("checkout_sessions", "expires_at", {"expireAfterSeconds": 0}),
+    ("checkout_sessions", "invoice_id", {}),
+    ("visits", "expires_at", {"expireAfterSeconds": 0}),
+    ("visits", [("ip", 1), ("day", 1)], {"unique": True}),
+    ("webhook_events", "event_key", {"unique": True}),
+    ("coupons", "code", {"unique": True}),
+    ("coupon_redemptions", [("code", 1), ("email", 1)], {"unique": True}),
+]
 
 
 async def ensure_indexes():
-    await db.users.create_index("email", unique=True)
-    await db.login_attempts.create_index("identifier")
-    await db.orders.create_index("user_id")
-    await db.messages.create_index("order_id")
-    await db.notifications.create_index("user_id")
-    await db.checkout_sessions.create_index("expires_at", expireAfterSeconds=0)
-    await db.visits.create_index("expires_at", expireAfterSeconds=0)
-    await db.visits.create_index([("ip", 1), ("day", 1)], unique=True)
-    await db.checkout_sessions.create_index("invoice_id")
-    await db.webhook_events.create_index("event_key", unique=True)
-    await db.coupons.create_index("code", unique=True)
-    await db.coupon_redemptions.create_index([("code", 1), ("email", 1)], unique=True)
+    for collection, keys, options in INDEXES:
+        try:
+            await db[collection].create_index(keys, **options)
+        except Exception as exc:
+            logger.error("Could not create index on %s (%s): %s", collection, keys, exc)
 
 
 async def seed_data():

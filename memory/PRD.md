@@ -54,9 +54,11 @@ assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.in
 ## Deployment notes (2026-06)
 - Production deploy failed because the FastAPI startup handler created indexes + seeded data
   inline: Atlas returned `User writes blocked, reason: DiskUseThresholdExceeded` (code 371) and
-  the app aborted startup, so the pod crashlooped. Startup is now `ensure_indexes()` /
-  `seed_data()` inside a try/except that logs and continues, so the app boots and serves reads
-  even when the database blocks writes.
+  the app aborted startup, so the pod crashlooped. Startup now iterates an `INDEXES` table with
+  a per-index try/except (one blocked index no longer skips the others) and `seed_data()` is
+  separately guarded, so the app always boots and serves reads on a read-only database.
+  Verified by stubbing every write to raise OperationFailure 371: `startup()` completes and logs
+  one error per index.
 - Added a plain `GET /health` route (the container's nginx probes `127.0.0.1:8001/health`,
   which previously had no handler); `/api/health` also added.
 - `.gitignore` no longer excludes `.env` files (deployment scan flagged it as a blocker).
