@@ -62,6 +62,24 @@ production — run it after adding products, since ids differ per database.
 - 2026-06: synced coupons META / 1337 / FOREVERFRIENDS to production plus the Mega Raid Day
   Ticket product, then repaired the exclusion lists. All 3 codes verified live on pokecoins.cc.
 
+## SellAuth payment flow (2026-06)
+- Webhook URL to configure in SellAuth (Notifications → webhook, invoice events):
+  `https://pokecoins.cc/api/webhooks/sellauth`. Secret lives at
+  dash.sellauth.com/shop#miscellaneous and must equal `SELLAUTH_WEBHOOK_SECRET`.
+  Signature = HMAC-SHA256 of the raw body in the `X-Signature` header (verified working).
+- SellAuth's Checkout API has NO return_url/success_url, and the per-product "Redirect URL"
+  setting does not apply to custom cart items, so SellAuth can never redirect buyers back.
+  Fix: checkout opens the SellAuth invoice in a NEW TAB and routes the original tab to
+  `/payment/success?session_id=...`, which polls `/api/checkout-sessions/{id}` until the order
+  exists. The success page offers "Reopen payment window" from `pokeforge_checkout_url`.
+- The React route is `/payment/success` (NOT `/payment-success` — that renders a blank page).
+- Session id is now sent as SellAuth `metadata` (documented field) instead of the unsupported
+  top-level `custom_fields`; the webhook reads metadata (dict or list) then falls back to invoice id.
+- SellAuth failures now return 400, not 502/503, so the real message reaches the buyer instead of
+  a Cloudflare error page.
+- The Emergent email proxy returns 422 `undeliverable_recipient` for fake test addresses
+  (use delivered@resend.dev for tests). Real addresses deliver fine; emailer now logs the body.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

@@ -38,14 +38,20 @@ async def create_checkout(*, items: list[dict], email: str, session_id: str) -> 
         ],
         "email": email,
         "currency": "USD",
-        "custom_fields": {"checkout_session_id": session_id},
+        "metadata": {"checkout_session_id": session_id},
     }
     async with httpx.AsyncClient(timeout=25) as client:
         resp = await client.post(
             f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
         )
-        if resp.status_code in (400, 422) and "custom_fields" in resp.text:
-            payload.pop("custom_fields", None)
+        # Older shops validate metadata as a plain list of strings.
+        if resp.status_code in (400, 422) and "metadata" in resp.text:
+            payload["metadata"] = [session_id]
+            resp = await client.post(
+                f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
+            )
+        if resp.status_code in (400, 422) and "metadata" in resp.text:
+            payload.pop("metadata", None)
             resp = await client.post(
                 f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
             )

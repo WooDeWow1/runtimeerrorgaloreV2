@@ -527,10 +527,11 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
         )
     except sellauth.SellAuthPlanError as exc:
         await db.checkout_sessions.delete_one({"_id": result.inserted_id})
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc))
     except sellauth.SellAuthError as exc:
         await db.checkout_sessions.delete_one({"_id": result.inserted_id})
-        raise HTTPException(status_code=502, detail=str(exc))
+        # 4xx so the real reason reaches the buyer: proxies replace 5xx bodies with their own page.
+        raise HTTPException(status_code=400, detail=str(exc))
 
     await db.checkout_sessions.update_one(
         {"_id": result.inserted_id},
@@ -620,6 +621,11 @@ async def sellauth_webhook(request: Request):
     invoice_id = str(invoice.get("id") or invoice.get("invoice_id") or "")
     custom = invoice.get("custom_fields") or payload.get("custom_fields") or {}
     session_id = custom.get("checkout_session_id") if isinstance(custom, dict) else None
+    meta = invoice.get("metadata") or payload.get("metadata")
+    if not session_id and isinstance(meta, dict):
+        session_id = meta.get("checkout_session_id")
+    if not session_id and isinstance(meta, list) and meta:
+        session_id = str(meta[0])
 
     event_key = f"{invoice_id}:{hashlib.sha256(raw).hexdigest()}"
     if await db.webhook_events.find_one({"event_key": event_key}):

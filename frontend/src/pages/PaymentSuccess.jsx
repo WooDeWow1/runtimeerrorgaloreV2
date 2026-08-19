@@ -7,6 +7,7 @@ import { useCart } from "@/context/CartContext";
 export default function PaymentSuccess() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id") || localStorage.getItem("pokeforge_checkout_session");
+  const payUrl = localStorage.getItem("pokeforge_checkout_url");
   const [state, setState] = useState("checking");
   const [orderId, setOrderId] = useState(null);
   const { clear } = useCart();
@@ -29,6 +30,7 @@ export default function PaymentSuccess() {
           if (!cleared.current) {
             cleared.current = true;
             clear();
+            localStorage.removeItem("pokeforge_checkout_url");
             localStorage.setItem(
               "pokeforge_guest_orders",
               JSON.stringify([
@@ -63,8 +65,20 @@ export default function PaymentSuccess() {
           <Loader2 className="mx-auto h-8 w-8 animate-spin text-[#00ffcc]" />
           <h1 className="mt-6 font-display text-2xl tracking-tighter">Waiting for payment confirmation…</h1>
           <p className="mt-4 text-xs text-zinc-500">
-            Crypto and Cash App payments can take a couple of minutes to settle.
+            Finish paying in the tab we just opened. Crypto and Cash App payments can take a couple of
+            minutes to settle — keep this page open and it will confirm itself.
           </p>
+          {payUrl && (
+            <a
+              href={payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="reopen-payment-btn"
+              className="mt-8 inline-block border border-[#00ffcc] px-8 py-3 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
+            >
+              Reopen payment window
+            </a>
+          )}
         </>
       )}
       {state === "paid" && (

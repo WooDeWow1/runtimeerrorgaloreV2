@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, money } from "@/lib/api";
@@ -11,6 +11,7 @@ const input =
 const label = "mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500";
 
 export default function Checkout() {
+  const navigate = useNavigate();
   const { items, total, invalid } = useCart();
   const { user } = useAuth();
   const isGuest = !user;
@@ -80,7 +81,11 @@ export default function Checkout() {
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
-      window.location.href = data.checkout_url;
+      // SellAuth cannot redirect back to us, so pay in a new tab and keep this tab on our
+      // confirmation screen, which polls until the payment lands.
+      localStorage.setItem("pokeforge_checkout_url", data.checkout_url);
+      window.open(data.checkout_url, "_blank", "noopener");
+      navigate(`/payment/success?session_id=${data.session_id}`);
     } catch (err) {
       const msg = apiError(err);
       setError(msg);

@@ -105,6 +105,9 @@ async def send_email(*, to: str, subject: str, html: str) -> str | None:
             )
         resp.raise_for_status()
         return resp.json().get("id")
+    except httpx.HTTPStatusError as exc:
+        logger.error("Email send failed: %s %s", exc.response.status_code, exc.response.text[:300])
+        return None
     except Exception as exc:
         logger.error("Email send failed: %s", exc)
         return None
