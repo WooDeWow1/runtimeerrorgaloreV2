@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 11 verification of the Coming Soon / Active storefront rules (backend + frontend). New pytest suite /app/backend/tests/test_coming_soon_v3.py (14 tests, 13 pass serially, 1 intentional failure documenting a real defect). Verified: GET /api/products returns active-only publicly and DOES include coming_soon products; include_inactive=true returns the superset; PUT /api/products/{id} persists active/coming_soon/is_featured; POST /api/orders/checkout returns 400 '<name> is not available yet' for coming_soon items (alone and mixed with a valid item) and 400 'unavailable' for inactive items; POST /api/waitlist persists an entry for a coming-soon product and shows in /api/admin/waitlist without _id. Playwright: /products shows all 3 coming-soon products (1M Stardust, 2 Shundo) under 'All', under their own category tabs, each with coming-soon-overlay-{id} + coming-soon-notice-{id} + join-waitlist-{id} and NO add-to-cart-{id}; the inactive Shundo product is hidden from the storefront but still listed in Admin > Products with '· INACTIVE · SOON'; Join Waitlist (guest prompt) succeeded with a success toast. Home: after starring a coming-soon Stardust and a coming-soon Shundo product, both render inside home-section-stardust / home-section-shundo_service with the overlay and no Add-to-cart; the marketing 'Shundo Hunting Services' section contains 0 product cards + 1 image (no hardcoded product rendering remains); the inactive Shundo never appears. Admin: helper text about Active vs Coming soon present, product-active-checkbox/product-coming-soon-checkbox prefill and save correctly, storefront reflects the change immediately, revert via UI works. Regression: Event Pass lock/unlock via coin bundle, cart drawer, checkout page + totals all fine; auth playbook suite re-run (9/11, same 2 pre-existing lockout failures); backend_test.py 84/89 (see minor items).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/products/{id}", "issue": "is_featured is silently reset to False on every update. ProductIn.is_featured defaults to False and the admin form (Admin.jsx editProduct/saveProduct) does not send it, so editing a product un-stars it. Real user impact: an admin who ticks 'Coming soon' in the edit form also loses the star, so the product vanishes from the Home page — the exact symptom in the bug report. Fix: make is_featured (and active/coming_soon) Optional in a dedicated update model and $set only provided fields, and/or include is_featured in the admin form state. Reproduced by tests/test_coming_soon_v3.py::TestFeaturedPreservedOnUpdate and by the Admin UI run (10M Stardust Farming lost its star after a form save; I restored it).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/products?include_inactive=true", "issue": "No auth required — any anonymous caller can list products the admin has deliberately pulled down (verified with plain curl, returned the inactive Shundo product). Gate include_inactive behind get_admin_user."},
+      {"endpoint": "POST /api/auth/login", "issue": "Pre-existing from iteration 10 and still unfixed: brute-force lockout keyed on request.client.host (ingress pod IP) so lockout fires on attempt 8 instead of 6 and a successful login only clears one proxy's counter (tests/test_auth_playbook_v2.py TestBruteForceLockout, 2 failures)."},
+      {"endpoint": "tests/backend_test.py::TestStardustVisibility", "issue": "Stale assertion 'no stardust product is coming_soon' now contradicts the feature; it fails because '1M Stardust Farming' is still coming_soon=true in the DB (the main agent's note said this toggle was reverted — it was not). Decide: revert that product or delete the obsolete assertion."},
+      {"endpoint": "tests/backend_test.py::TestTracking", "issue": "test_public_get_guest_order / test_public_get_messages fail with AttributeError: module 'pytest' has no attribute 'paid_order_id' — cross-class state shared via the pytest module under -n 2 loadscope (worker isolation). Test-infra flakiness, not a product bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Admin > Products > Edit and save", "issue": "Saving the edit form drops the featured star (see the PUT /api/products/{id} critical issue) — the product silently disappears from the Home page.", "affected_selectors": ["save-product-btn", "toggle-featured-{id}", "product-coming-soon-checkbox"]}
+    ],
+    "design_issues": [
+      {"screen": "Home", "issues": ["When a shundo_service product is starred, the page renders two consecutive identical H2 headings 'Shundo Hunting Services' (the featured-category grid immediately followed by the marketing/phase-two section) — visually redundant; consider renaming one (e.g. grid heading 'Shundo Hunting' vs marketing block) or moving the marketing block above the featured grid."]},
+      {"screen": "Product card (coming soon)", "issues": ["Coming-soon cards still show the price in the buy-now cyan and would still render the -x% savings badge if an MSRP is set, which reads as a live offer on a non-purchasable item. Minor: mute the price / suppress product-savings-{id} when coming_soon."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_coming_soon_v3.py",
+    "/app/test_reports/pytest/iteration11_comingsoon.xml",
+    "/app/test_reports/pytest/iteration11_regression.xml",
+    "/app/test_reports/pytest/iteration11_auth.xml"
+  ],
+  "action_items": [
+    "Stop PUT /api/products/{id} from wiping is_featured (Optional fields + $set of provided keys, and carry is_featured in the Admin edit form state).",
+    "Require admin auth for GET /api/products?include_inactive=true.",
+    "Decide on '1M Stardust Farming' still being coming_soon=true in the DB and update/remove the stale TestStardustVisibility assertion in backend_test.py.",
+    "Optional polish: de-duplicate the two 'Shundo Hunting Services' headings on Home; mute price/savings badge on coming-soon cards.",
+    "Still open from iteration 10: brute-force lockout identifier (X-Forwarded-For or email-only key)."
+  ],
+  "critical_code_review_comments": [
+    "models.py ProductIn is reused for both create and update; every boolean with a default (active, coming_soon, is_featured) is therefore destructive on PUT. Introduce ProductUpdate with Optional fields and payload.model_dump(exclude_unset=True).",
+    "Home.jsx: SECTIONS-driven rendering plus a copy-only Shundo marketing block is clean and the hardcoded featuredShundo path is gone — verified 0 product cards inside the marketing section.",
+    "ProductCard.jsx correctly makes comingSoon win over the event_pass lock (locked = !comingSoon && ...) so a coming-soon Event Pass shows Join Waitlist rather than Locked.",
+    "resolve_items() checks active in the Mongo query and coming_soon right after, so the purchase guard cannot be bypassed by a crafted cart payload — verified for single, mixed and freshly-flagged items.",
+    "test_coming_soon_v3.py mutates shared seeded products; run it with -n 0 (serially) or the two mutating classes race across xdist workers (observed one false failure under -n 2)."
+  ],
+  "updated_files": ["/app/backend/tests/test_coming_soon_v3.py", "/app/test_reports/iteration_11.json"],
+  "success_rate": {"backend": "96% (13/14 new suite serially, 84/89 regression, 9/11 auth playbook; the single new-suite failure is the documented is_featured wipe)", "frontend": "100% of the coming-soon/active requirements (products page, home page, admin form, waitlist, event-pass regression)"},
+  "seed_data_creation": "No new products created. Temporarily toggled coming_soon/active/is_featured on seeded products via API and the Admin UI; all 12 products verified restored to their pre-test state (including 10M Stardust Farming's star, which the admin form had silently cleared). Deleted the two qa_* waitlist rows created during testing.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (works, not locked out).",
+  "context_for_next_testing_agent": "New suite tests/test_coming_soon_v3.py — run with -n 0, it mutates seeded products and restores them via a `restorer` fixture. Product ids used: 1M Stardust 6a84f9a46717523cea50b635 (coming_soon), Shundo Single 6a82c7a26448ed8a06f8bbf5 (coming_soon), Shundo CD 6a83148da41a45916f77af70 (coming_soon), Shundo CD inactive 6a83137c14a920d4c51b5e64, bundle 6a82c79f6448ed8a06f8bbf0, Monthly Go Pass 6a82c7a16448ed8a06f8bbf3. Checkout POST requires ptc_username/ptc_password/origin_url in addition to items/email. Home page needs is_featured=true to show a product; use PATCH /api/products/{id}/featured (it does NOT clobber other fields, unlike PUT). Login testids: login-email/login-password/login-submit; admin tab: admin-tab-products.",
+  "rca_of_the_issue": "The reported 'Coming Soon products vanish' symptom is fully fixed at the data/render layer (list_products only filters on active; ProductCard renders overlay + Join Waitlist; Home renders shundo_service through the generic SECTIONS grid). However a second, still-live cause remains: PUT /api/products/{id} validates against ProductIn where is_featured defaults to False and the Admin edit form never sends it, so an admin who ticks 'Coming soon' in the form saves is_featured=false and the product drops off the Home page even though it is still on /products. Confirmed by API test and reproduced through the Admin UI."
+}

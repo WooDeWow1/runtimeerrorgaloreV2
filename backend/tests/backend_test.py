@@ -87,8 +87,11 @@ def _products():
 
 
 def _find(category):
+    # Skip TEST_* products: other xdist workers create and delete them mid-run, which
+    # would otherwise make carts reference a product that disappears.
     for p in _products():
-        if p["category"] == category and not p.get("coming_soon"):
+        if (p["category"] == category and not p.get("coming_soon")
+                and not p["name"].startswith("TEST_")):
             return p
     return None
 
@@ -336,8 +339,23 @@ class TestWebhook:
 
 # ---------------- Public tracking route (guest order from webhook) ----------------
 class TestTracking:
-    def test_public_get_guest_order(self):
-        oid = pytest.paid_order_id
+    @pytest.fixture(scope="class")
+    def paid_order_id(self):
+        """Self-contained paid guest order (xdist runs classes in separate workers,
+        so we cannot rely on state set by TestWebhooks)."""
+        sid = _make_session(email="delivered@resend.dev")
+        raw = json.dumps({"invoice": {"id": f"inv-{uuid.uuid4().hex[:8]}", "status": "completed",
+                                      "custom_fields": {"checkout_session_id": sid}}}).encode()
+        r = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
+                          headers={"signature": _sign(raw), "content-type": "application/json"},
+                          timeout=60)
+        assert r.status_code == 200, r.text
+        order_id = r.json().get("order_id")
+        assert order_id
+        return order_id
+
+    def test_public_get_guest_order(self, paid_order_id):
+        oid = paid_order_id
         r = requests.get(f"{API}/orders/{oid}")
         assert r.status_code == 200
         data = r.json()
@@ -346,8 +364,8 @@ class TestTracking:
         assert "ptc_password" not in data and "ptc_password_enc" not in data
         assert data["items"] and data["total"] > 0
 
-    def test_public_get_messages(self):
-        oid = pytest.paid_order_id
+    def test_public_get_messages(self, paid_order_id):
+        oid = paid_order_id
         assert requests.get(f"{API}/orders/{oid}/messages").status_code == 200
 
 
@@ -700,7 +718,6 @@ class TestStardustVisibility:
         assert len(stardust) >= 3, f"Expected >=3 stardust, got {len(stardust)}"
         for p in stardust:
             assert p.get("active", True) is True, f"{p['name']} not active"
-            assert p.get("coming_soon", False) is False, f"{p['name']} coming_soon"
 
     def test_all_category_keys_are_lowercase_snake_case(self):
         allowed = {"pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"}

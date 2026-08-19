@@ -10,7 +10,7 @@ const input =
 const label = "mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-zinc-500";
 const EMPTY = {
   name: "", description: "", category: "pokecoin_bundle", price: "", msrp: "", image_url: "",
-  coins: "", badge: "", active: true, coming_soon: false,
+  coins: "", badge: "", active: true, coming_soon: false, is_featured: false,
 };
 
 const EMPTY_COUPON = {
@@ -220,7 +220,7 @@ export default function Admin() {
     setForm({
       name: p.name, description: p.description, category: p.category, price: String(p.price),
       msrp: p.msrp ?? "", image_url: p.image_url || "", coins: p.coins ?? "", badge: p.badge || "",
-      active: p.active, coming_soon: p.coming_soon,
+      active: p.active, coming_soon: p.coming_soon, is_featured: p.is_featured,
     });
     setTab("products");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -396,15 +396,23 @@ export default function Admin() {
               <label className={label}>Image URL</label>
               <input data-testid="product-image-input" className={input} value={form.image_url} onChange={set("image_url")} />
             </div>
-            <div className="flex gap-6 pt-2">
-              <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
-                <input data-testid="product-active-checkbox" type="checkbox" checked={form.active} onChange={set("active")} />
-                Active
-              </label>
-              <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
-                <input data-testid="product-coming-soon-checkbox" type="checkbox" checked={form.coming_soon} onChange={set("coming_soon")} />
-                Coming soon
-              </label>
+            <div className="space-y-2 pt-2">
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+                  <input data-testid="product-active-checkbox" type="checkbox" checked={form.active} onChange={set("active")} />
+                  Active
+                </label>
+                <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+                  <input data-testid="product-coming-soon-checkbox" type="checkbox" checked={form.coming_soon} onChange={set("coming_soon")} />
+                  Coming soon
+                </label>
+              </div>
+              <p className="text-[10px] leading-relaxed text-zinc-600">
+                <span className="text-zinc-400">Active</span> controls whether the product appears in the store
+                at all — untick it to pull a product down.{" "}
+                <span className="text-zinc-400">Coming soon</span> keeps it visible (and on the home page if
+                starred) with a Coming Soon badge and no way to buy it.
+              </p>
             </div>
             <div className="flex gap-3 pt-2">
               <button

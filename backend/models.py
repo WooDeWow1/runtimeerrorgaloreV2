@@ -65,6 +65,20 @@ class ProductIn(BaseModel):
     is_featured: bool = False
 
 
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    price: Optional[float] = Field(default=None, gt=0)
+    msrp: Optional[float] = Field(default=None, gt=0)
+    image_url: Optional[str] = None
+    coins: Optional[int] = Field(default=None, gt=0)
+    badge: Optional[str] = None
+    active: Optional[bool] = None
+    coming_soon: Optional[bool] = None
+    is_featured: Optional[bool] = None
+
+
 class Product(BaseDocument):
     name: str
     description: str = ""

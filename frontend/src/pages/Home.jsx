@@ -15,6 +15,7 @@ const SECTIONS = [
   { key: "event_pass", note: "Bundle required", noteClass: "text-[#f4d03f]" },
   { key: "medals", note: "Standalone or bundled", noteClass: "text-[#c7a6f0]" },
   { key: "stardust", note: "Farmed by operators", noteClass: "text-zinc-600" },
+  { key: "shundo_service", note: "Operator fleet", noteClass: "text-[#c7a6f0]" },
 ];
 
 export default function Home() {
@@ -27,7 +28,6 @@ export default function Home() {
 
   const featured = products.filter((p) => p.is_featured);
   const byCat = (c) => featured.filter((p) => p.category === c);
-  const featuredShundo = byCat("shundo_service");
   const hasAnyFeatured = featured.length > 0;
 
   return (
@@ -158,7 +158,7 @@ export default function Home() {
           <div className="lg:col-span-6">
             <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#9966cc]">// phase two</p>
             <h2 className="mt-5 font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-              Shundo Hunting Services
+              Phase Two — Hunting Fleet
             </h2>
             <p className="mt-6 max-w-lg text-sm leading-relaxed text-zinc-400">
               Advanced, targeted Shundo acquisition handled by our dedicated operator fleet. We use a private
@@ -170,12 +170,7 @@ export default function Home() {
             </span>
           </div>
           <div className="grid gap-8 sm:grid-cols-2 lg:col-span-6">
-            {featuredShundo.map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
-            {featuredShundo.length === 0 && (
-              <img src={PSYDUCK} alt="Psyduck" className="border border-[#1f1f1f] object-cover" />
-            )}
+            <img src={PSYDUCK} alt="Psyduck" className="border border-[#1f1f1f] object-cover sm:col-span-2" />
           </div>
         </div>
       </section>

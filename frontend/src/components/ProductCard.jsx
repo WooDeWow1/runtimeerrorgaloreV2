@@ -9,7 +9,8 @@ import { useAuth } from "@/context/AuthContext";
 export const ProductCard = ({ product, featured = false }) => {
   const { add, hasCoins } = useCart();
   const { user } = useAuth();
-  const locked = product.category === "event_pass" && !hasCoins;
+  const comingSoon = !!product.coming_soon;
+  const locked = !comingSoon && product.category === "event_pass" && !hasCoins;
   const [joining, setJoining] = useState(false);
 
   const joinWaitlist = async () => {
@@ -49,12 +50,22 @@ export const ProductCard = ({ product, featured = false }) => {
           className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent" />
-        {product.badge && (
+        {comingSoon && (
+          <div
+            data-testid={`coming-soon-overlay-${product.id}`}
+            className="absolute inset-0 flex items-center justify-center bg-black/65 backdrop-blur-[2px]"
+          >
+            <span className="border border-[#9966cc] bg-black/70 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] text-[#c7a6f0]">
+              Coming Soon
+            </span>
+          </div>
+        )}
+        {product.badge && !comingSoon && (
           <span className="absolute left-3 top-3 border border-[#00ffcc]/60 bg-black/70 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-[#00ffcc]">
             {product.badge}
           </span>
         )}
-        {savings && (
+        {savings && !comingSoon && (
           <span
             data-testid={`product-savings-${product.id}`}
             className="absolute right-3 top-3 bg-[#00ffcc] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-black"
@@ -85,6 +96,15 @@ export const ProductCard = ({ product, featured = false }) => {
           </span>
         )}
 
+        {comingSoon && (
+          <p
+            data-testid={`coming-soon-notice-${product.id}`}
+            className="mt-4 border border-[#9966cc]/50 bg-[#9966cc]/10 p-3 text-[10px] leading-relaxed text-[#c7a6f0]"
+          >
+            Coming soon — not purchasable yet. Join the waitlist and we'll email you the moment it opens.
+          </p>
+        )}
+
         {locked && (
           <p
             data-testid={`locked-notice-${product.id}`}
@@ -104,11 +124,14 @@ export const ProductCard = ({ product, featured = false }) => {
                 MSRP {money(product.msrp)}
               </p>
             )}
-            <span data-testid={`product-price-${product.id}`} className="font-display text-xl text-[#00ffcc]">
+            <span
+              data-testid={`product-price-${product.id}`}
+              className={`font-display text-xl ${comingSoon ? "text-zinc-500" : "text-[#00ffcc]"}`}
+            >
               {money(product.price)}
             </span>
           </div>
-          {product.coming_soon ? (
+          {comingSoon ? (
             <button
               data-testid={`join-waitlist-${product.id}`}
               onClick={joinWaitlist}

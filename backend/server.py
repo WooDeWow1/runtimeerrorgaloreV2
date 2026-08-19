@@ -37,6 +37,7 @@ from models import (  # noqa: E402
     PasswordChangeRequest,
     Product,
     ProductIn,
+    ProductUpdate,
     RegisterRequest,
     StatusUpdate,
     UserPublic,
@@ -231,7 +232,11 @@ async def refresh(request: Request, response: Response):
 
 # ---------------- Products ----------------
 @api.get("/products")
-async def list_products(include_inactive: bool = False):
+async def list_products(
+    include_inactive: bool = False, user: Optional[dict] = Depends(get_optional_user)
+):
+    if include_inactive and (not user or user.get("role") != "admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
     query = {} if include_inactive else {"active": True}
     docs = await db.products.find(query).sort("price", 1).to_list(500)
     return [Product.from_mongo(d).model_dump(by_alias=False) for d in docs]
@@ -248,14 +253,16 @@ async def create_product(payload: ProductIn, admin: dict = Depends(get_admin_use
 
 
 @api.put("/products/{product_id}")
-async def update_product(product_id: str, payload: ProductIn, admin: dict = Depends(get_admin_user)):
-    if payload.category not in CATEGORIES:
+async def update_product(product_id: str, payload: ProductUpdate, admin: dict = Depends(get_admin_user)):
+    if payload.category is not None and payload.category not in CATEGORIES:
         raise HTTPException(status_code=400, detail="Invalid category")
     existing = await db.products.find_one({"_id": oid(product_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
-    updates = payload.model_dump()
-    await db.products.update_one({"_id": oid(product_id)}, {"$set": updates})
+    # Only touch the fields the caller actually sent, so flags like is_featured survive an edit.
+    updates = payload.model_dump(exclude_unset=True)
+    if updates:
+        await db.products.update_one({"_id": oid(product_id)}, {"$set": updates})
     doc = await db.products.find_one({"_id": oid(product_id)})
     return Product.from_mongo(doc).model_dump(by_alias=False)
 

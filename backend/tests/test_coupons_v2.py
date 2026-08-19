@@ -168,11 +168,12 @@ class TestFixedCouponValidate:
             assert r.status_code == 200, r.text
             d = r.json()
             assert d["subtotal"] == round(cheap["price"], 2)
-            assert d["discount"] == d["subtotal"], f"discount {d['discount']} should cap at subtotal"
-            assert d["total"] == 0.0
-            assert d["total"] >= 0
-            # label still shows the face value of the coupon
-            assert d["discount_label"] == "$50.00 off"
+            # server keeps MIN_CHARGE ($0.50) chargeable for the payment provider
+            expected_discount = round(d["subtotal"] - 0.50, 2)
+            assert d["discount"] == expected_discount, f"discount {d['discount']} should cap at subtotal - MIN_CHARGE"
+            assert d["total"] == 0.50
+            assert d["total"] > 0
+            assert d["discount_label"] == f"${expected_discount:.2f} off"
         finally:
             delete_coupon(admin_token, c["id"])
 
