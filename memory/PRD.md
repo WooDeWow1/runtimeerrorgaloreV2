@@ -53,8 +53,14 @@ Live at https://pokecoins.cc (preview and production use separate databases).
 preview catalog from localhost:8001, creates any product production is missing (matched by name)
 via the live admin API, and syncs the `is_featured` star. Run with no args for a dry run,
 `--apply` to write. Reads ADMIN_EMAIL / ADMIN_PASSWORD from backend/.env.
+`/app/scripts/sync_coupons_to_prod.py` does the same for discount codes (skips codes production
+already has, remaps product exclusions from preview ids to production ids by product name).
+`/app/scripts/fix_coupon_exclusions.py` re-syncs exclusions on coupons that already exist in
+production — run it after adding products, since ids differ per database.
 - 2026-06: used it to push the 3 Stardust products (missing in production because writes were
   blocked when the cluster was full) and to restore 3 featured stars. Production now has all 11.
+- 2026-06: synced coupons META / 1337 / FOREVERFRIENDS to production plus the Mega Raid Day
+  Ticket product, then repaired the exclusion lists. All 3 codes verified live on pokecoins.cc.
 
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
