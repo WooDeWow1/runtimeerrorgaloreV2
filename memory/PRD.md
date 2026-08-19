@@ -51,5 +51,17 @@ order tracking, admin dashboard, premium dark "hacker-forum" aesthetic.
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
 
+## Deployment notes (2026-06)
+- Production deploy failed because the FastAPI startup handler created indexes + seeded data
+  inline: Atlas returned `User writes blocked, reason: DiskUseThresholdExceeded` (code 371) and
+  the app aborted startup, so the pod crashlooped. Startup is now `ensure_indexes()` /
+  `seed_data()` inside a try/except that logs and continues, so the app boots and serves reads
+  even when the database blocks writes.
+- Added a plain `GET /health` route (the container's nginx probes `127.0.0.1:8001/health`,
+  which previously had no handler); `/api/health` also added.
+- `.gitignore` no longer excludes `.env` files (deployment scan flagged it as a blocker).
+- **The Atlas cluster is out of disk.** Until storage is freed/upgraded, writes (orders,
+  waitlist signups, coupon redemptions) will fail in production even though the app boots.
+
 ## Credentials
 See `/app/memory/test_credentials.md`.

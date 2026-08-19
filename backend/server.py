@@ -877,6 +877,16 @@ async def list_waitlist(admin: dict = Depends(get_admin_user)):
     ]
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@api.get("/health")
+async def api_health():
+    return {"status": "ok"}
+
+
 @api.get("/")
 async def root():
     return {"message": "PokeCoins API online"}
@@ -940,6 +950,15 @@ SEED_PRODUCTS = [
 
 @app.on_event("startup")
 async def startup():
+    try:
+        await ensure_indexes()
+        await seed_data()
+    except Exception as exc:
+        # Never let a database problem (e.g. Atlas write blocks) stop the app from booting.
+        logger.error("Startup database initialisation skipped: %s", exc)
+
+
+async def ensure_indexes():
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
     await db.orders.create_index("user_id")
@@ -953,6 +972,8 @@ async def startup():
     await db.coupons.create_index("code", unique=True)
     await db.coupon_redemptions.create_index([("code", 1), ("email", 1)], unique=True)
 
+
+async def seed_data():
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]
     existing = await db.users.find_one({"email": admin_email})
