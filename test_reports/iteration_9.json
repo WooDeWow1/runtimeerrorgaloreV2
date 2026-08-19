@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only regression to validate the craco.config.js dev-overlay filter fix. Tested /, /products, /about, /checkout, /dashboard, /login, /admin at 1920x1080 and 390x844. Also synthesized the exact opaque cross-origin 'Script error.' event and confirmed the overlay is suppressed on every page. Verified a genuine ErrorEvent still surfaces (not swallowed by the filter). Ran core storefront flows (products page, Stardust filter, add-to-cart, cart drawer, Event Pass locked state) and the full coupon lifecycle on /checkout (invalid → inline error, valid TESTQA10 → applied-coupon + discount row + total decreases from $14.99 to $13.49, remove restores $14.99). Verified admin login and all four admin tabs render (Orders/Products/Coupons/Settings) with visitors-table and password-form. Created and cleaned up a TESTQA10 coupon.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "craco.config.js applies the client.overlay filter twice (inside webpackConfig.devServer AND again after makeDevServerV5Compatible/withVisualEdits) — belt-and-braces per the request, but consider centralising into one helper to avoid drift if the regex ever changes.",
+    "The runtimeErrors filter matches only /^script error\\.?$/i on the message string. That is the correct minimal filter for the Cloudflare-injected opaque errors, but if webpack-dev-server passes the object as {message, filename, ...} the code already handles both string and object forms — good.",
+    "Cart state is in-memory React state only (localStorage contains no cart key). This means a full page reload on /checkout with an empty cart shows 'Nothing to check out'. Not a bug per the spec (which says 'add a product first in the same browser context'), but worth persisting the cart to localStorage/sessionStorage for a better mobile refresh UX."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only run)", "frontend": "100%"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin (used; not locked out). Created & deleted coupon TESTQA10 (10% off).",
+  "seed_data_creation": "Created coupon TESTQA10 via POST /api/admin/coupons and deleted it via DELETE /api/admin/coupons/{id} at end of test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Overlay suppression is live and confirmed on all 7 pages × 2 viewports. Both the webpackConfig.devServer overlay filter and the post-visual-edits wrapper filter agree (regex /^script error\\.?$/i). Synthetic ErrorEvent('Script error.') does NOT trigger the overlay; a real ErrorEvent('Deliberate test failure XYZ') DID surface, confirming genuine errors are not swallowed. Coupon flow tested end-to-end with UI test-ids: coupon-input, apply-coupon-btn, coupon-error, applied-coupon, checkout-discount-row, checkout-total, remove-coupon-btn — all working. checkout-btn lives inside cart-drawer as a BUTTON (no href) — use JS click or scroll into view. Cart is in-memory only, so use client-side navigation from the cart drawer to /checkout (do not page.goto after adding to cart, or the cart is lost). Backend regression pytest not executed on this iteration (testing_type=frontend only); prior iteration_8 reported 89/89 green and this change is frontend-config only.",
+  "rca of the issue": "Cloudflare injects challenge-platform / RUM scripts into the *.preview.emergentagent.com domain. When those requests are aborted (ERR_ABORTED on /cdn-cgi/...) the browser fires an opaque cross-origin `window.onerror` with message 'Script error.', no stack, no filename. webpack-dev-server's default client.overlay.runtimeErrors=true rendered these as the full-screen red 'Uncaught runtime errors' panel that blocked every page on the preview. FIX (already applied in /app/frontend/craco.config.js): devServerConfig.client.overlay.runtimeErrors is now a function that returns false when the error message trims to the literal 'Script error' / 'Script error.' (case-insensitive), and true otherwise — so genuine app errors still surface. The filter is applied both before AND after the visual-edits wrapper so it wins regardless of wrap order. MITIGATION VERIFIED: 14 synthetic dispatches (7 routes × 2 viewports) produced zero overlays; a genuine Error dispatch DID produce the overlay."
+}

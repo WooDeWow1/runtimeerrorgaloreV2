@@ -39,8 +39,10 @@ UI: premium dark-mode hacker-forum gaming aesthetic with Snorlax / Gengar / Psyd
 - 2026-06: fixed Stardust invisibility (root cause: those docs had `active=false` + `coming_soon=true`, so the active-only storefront query skipped them — categories were already correctly synced lowercase snake_case). Added `is_featured` to products with an admin star toggle (`PATCH /api/products/{id}/featured`); the home page now renders ONLY starred products grouped by category and hides any category with zero stars, while `/products` still lists the whole active catalog. Long descriptions clamped to 5 lines on cards. 66/66 backend tests pass
 - 2026-06: coupon/discount codes — `coupons` collection (unique code, percent_off, active, excluded_product_ids, excluded_categories, min_subtotal, max_uses, used_count, expires_at, note); public `POST /api/coupons/validate`; admin CRUD `GET/POST/PUT/DELETE /api/admin/coupons`; checkout recomputes the discount server-side, stores subtotal/discount/coupon_code on the session and charges SellAuth the discounted per-item amounts (with rounding drift absorbed into the last eligible line); `used_count` increments once when the webhook promotes the session. New admin "Coupons" tab with category chips + per-product exclusion pickers; checkout shows subtotal / discount / total. 89/89 backend tests pass
 
-## Backlog
-- P1: confirm the real SellAuth webhook payload shape on a live paid invoice and tighten field mapping
+## Environment notes
+- The preview domain sits behind Cloudflare, which injects challenge-platform/RUM scripts. When those requests abort, the browser raises opaque cross-origin `window.onerror` "Script error." events, and webpack-dev-server's overlay rendered them as a full-screen "Uncaught runtime errors" panel on every page. Fixed in `frontend/craco.config.js` by filtering `client.overlay.runtimeErrors` for `/^script error\.?$/i` (applied after `makeDevServerV5Compatible`/`withVisualEdits` so it wins). Dev-server only — production builds have no overlay, so production was never affected.
+
+## Backlog- P1: confirm the real SellAuth webhook payload shape on a live paid invoice and tighten field mapping
 - P1: guest order lookup by email + order number; credential auto-purge after completion
 - P2: coupon codes, admin order search/filters, sales analytics, audit log of credential reveals
 - P2: split `server.py` into routers, admin 2FA

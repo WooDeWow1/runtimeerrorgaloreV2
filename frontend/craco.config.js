@@ -125,6 +125,21 @@ webpackConfig.devServer = (devServerConfig) => {
     };
   }
 
+  // Cloudflare injects challenge/RUM scripts into the preview domain; when those fail they surface
+  // as opaque cross-origin `window.onerror` "Script error." events, which the dev overlay renders as
+  // a full-screen "Uncaught runtime errors" panel on every page. Keep compile errors, drop those.
+  devServerConfig.client = {
+    ...devServerConfig.client,
+    overlay: {
+      errors: true,
+      warnings: false,
+      runtimeErrors: (error) => {
+        const message = typeof error === "string" ? error : error?.message || "";
+        return !/^script error\.?$/i.test(message.trim());
+      },
+    },
+  };
+
   return devServerConfig;
 };
 
@@ -145,7 +160,23 @@ if (isDevServer) {
 }
 
 const configureDevServer = webpackConfig.devServer;
-webpackConfig.devServer = (devServerConfig) =>
-  makeDevServerV5Compatible(configureDevServer(devServerConfig));
+webpackConfig.devServer = (devServerConfig) => {
+  const compatible = makeDevServerV5Compatible(configureDevServer(devServerConfig));
+
+  // Applied last so it also wins over any overlay config added by visual-edits.
+  compatible.client = {
+    ...compatible.client,
+    overlay: {
+      errors: true,
+      warnings: false,
+      runtimeErrors: (error) => {
+        const message = typeof error === "string" ? error : error?.message || "";
+        return !/^script error\.?$/i.test(message.trim());
+      },
+    },
+  };
+
+  return compatible;
+};
 
 module.exports = webpackConfig;
