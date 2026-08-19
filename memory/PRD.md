@@ -47,6 +47,15 @@ order tracking, admin dashboard, premium dark "hacker-forum" aesthetic.
 - P2: Server-side product-name join on `/api/admin/waitlist`; paginate `/api/products`
 - P2: Split `Admin.jsx` (840 lines) into per-tab components
 
+## Production
+Live at https://pokecoins.cc (preview and production use separate databases).
+`/app/scripts/sync_products_to_prod.py` is a one-time/repeatable catalog sync: it reads the
+preview catalog from localhost:8001, creates any product production is missing (matched by name)
+via the live admin API, and syncs the `is_featured` star. Run with no args for a dry run,
+`--apply` to write. Reads ADMIN_EMAIL / ADMIN_PASSWORD from backend/.env.
+- 2026-06: used it to push the 3 Stardust products (missing in production because writes were
+  blocked when the cluster was full) and to restore 3 featured stars. Production now has all 11.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
