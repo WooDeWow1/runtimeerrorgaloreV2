@@ -63,6 +63,7 @@ db = client[os.environ["DB_NAME"]]
 
 SELLAUTH_WEBHOOK_SECRET = os.environ["SELLAUTH_WEBHOOK_SECRET"]
 SESSION_TTL_MINUTES = int(os.environ.get("CHECKOUT_SESSION_TTL_MINUTES", "30"))
+MIN_CHARGE = 0.50
 
 app = FastAPI(title="PokeCoins API")
 api = APIRouter(prefix="/api")
@@ -294,12 +295,15 @@ async def resolve_items(entries) -> List[OrderItem]:
     return items
 
 
-async def apply_coupon(code: Optional[str], items: List[OrderItem]) -> dict:
+async def apply_coupon(
+    code: Optional[str], items: List[OrderItem], email: Optional[str] = None
+) -> dict:
     """Returns pricing breakdown. Raises 400 with a human message if the code cannot be used."""
     subtotal = round(sum(i.price * i.quantity for i in items), 2)
     result = {
         "subtotal": subtotal, "discount": 0.0, "total": subtotal,
-        "coupon_code": None, "percent_off": None,
+        "coupon_code": None, "percent_off": None, "amount_off": None,
+        "discount_type": None, "discount_label": None,
         "eligible_subtotal": subtotal, "excluded_items": [],
     }
     if not code:
@@ -318,6 +322,15 @@ async def apply_coupon(code: Optional[str], items: List[OrderItem]) -> dict:
             status_code=400,
             detail=f"Spend at least ${coupon['min_subtotal']:.2f} to use this coupon.",
         )
+    if coupon.get("one_per_customer") and email:
+        used = await db.coupon_redemptions.find_one(
+            {"code": coupon["code"], "email": email.strip().lower()}
+        )
+        if used:
+            raise HTTPException(
+                status_code=400,
+                detail="You've already used this code — it is limited to one per customer.",
+            )
 
     excluded_ids = set(coupon.get("excluded_product_ids") or [])
     excluded_cats = set(coupon.get("excluded_categories") or [])
@@ -333,12 +346,29 @@ async def apply_coupon(code: Optional[str], items: List[OrderItem]) -> dict:
         )
 
     eligible_subtotal = round(sum(i.price * i.quantity for i in eligible), 2)
-    discount = round(eligible_subtotal * coupon["percent_off"] / 100, 2)
+    if coupon.get("discount_type", "percent") == "fixed":
+        amount = float(coupon.get("amount_off") or 0)
+        # Cap the discount so the cart still has a chargeable total for the payment provider.
+        max_discount = max(round(subtotal - MIN_CHARGE, 2), 0)
+        discount = round(min(amount, eligible_subtotal, max_discount), 2)
+        if discount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This cart is too small for that code — spend at least ${MIN_CHARGE + 0.01:.2f}.",
+            )
+        label = f"${discount:.2f} off"
+    else:
+        discount = round(eligible_subtotal * coupon["percent_off"] / 100, 2)
+        label = f"{coupon['percent_off']:g}% off"
     result.update({
         "discount": discount,
         "total": round(subtotal - discount, 2),
         "coupon_code": coupon["code"],
-        "percent_off": coupon["percent_off"],
+        "percent_off": coupon.get("percent_off"),
+        "amount_off": coupon.get("amount_off"),
+        "discount_type": coupon.get("discount_type", "percent"),
+        "discount_label": label,
+        "one_per_customer": bool(coupon.get("one_per_customer")),
         "eligible_subtotal": eligible_subtotal,
         "excluded_items": excluded_names,
     })
@@ -348,7 +378,15 @@ async def apply_coupon(code: Optional[str], items: List[OrderItem]) -> dict:
 @api.post("/coupons/validate")
 async def validate_coupon(payload: CouponValidateRequest):
     items = await resolve_items(payload.items)
-    return await apply_coupon(payload.code, items)
+    return await apply_coupon(payload.code, items, payload.email)
+
+
+def validate_coupon_payload(payload: CouponIn):
+    if payload.discount_type == "fixed":
+        if not payload.amount_off:
+            raise HTTPException(status_code=400, detail="Fixed coupons need a dollar amount off.")
+    elif not payload.percent_off:
+        raise HTTPException(status_code=400, detail="Percentage coupons need a percent off.")
 
 
 @api.get("/admin/coupons")
@@ -359,6 +397,7 @@ async def list_coupons(admin: dict = Depends(get_admin_user)):
 
 @api.post("/admin/coupons")
 async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)):
+    validate_coupon_payload(payload)
     for cat in payload.excluded_categories:
         if cat not in CATEGORIES:
             raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
@@ -373,6 +412,7 @@ async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)
 
 @api.put("/admin/coupons/{coupon_id}")
 async def update_coupon(coupon_id: str, payload: CouponIn, admin: dict = Depends(get_admin_user)):
+    validate_coupon_payload(payload)
     for cat in payload.excluded_categories:
         if cat not in CATEGORIES:
             raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
@@ -429,12 +469,13 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
             detail="An Event Pass requires at least one Pokécoin Bundle in your cart.",
         )
 
-    pricing = await apply_coupon(payload.coupon_code, items)
-    total = pricing["total"]
     user_id = str(user["_id"]) if user else ""
     email = (user["email"] if user else (payload.email or "")).lower()
     if not email:
         raise HTTPException(status_code=400, detail="An email address is required for guest checkout")
+
+    pricing = await apply_coupon(payload.coupon_code, items, email)
+    total = pricing["total"]
 
     # Nothing is written to `orders` yet: a spam-resistant temporary session with a 30 min TTL.
     session_doc = {
@@ -458,7 +499,9 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     # SellAuth is charged the discounted amounts; the order keeps original prices + discount metadata.
     charge_items = [i.model_dump() for i in items]
     if pricing["discount"] > 0:
-        factor = 1 - pricing["percent_off"] / 100
+        factor = max(
+            (pricing["eligible_subtotal"] - pricing["discount"]) / pricing["eligible_subtotal"], 0
+        )
         excluded = set(pricing["excluded_items"])
         eligible_idx = [n for n, e in enumerate(charge_items) if e["name"] not in excluded]
         for n in eligible_idx:
@@ -515,6 +558,11 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     order_id = str(result.inserted_id)
     if session.get("coupon_code"):
         await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
+        await db.coupon_redemptions.update_one(
+            {"code": session["coupon_code"], "email": session["email"].lower()},
+            {"$set": {"order_id": order_id, "redeemed_at": utc_now()}},
+            upsert=True,
+        )
     await db.checkout_sessions.update_one(
         {"_id": session["_id"]}, {"$set": {"status": "paid", "order_id": order_id}}
     )
@@ -816,7 +864,8 @@ async def join_waitlist(payload: WaitlistIn):
 async def list_waitlist(admin: dict = Depends(get_admin_user)):
     docs = await db.waitlist.find().sort("created_at", -1).to_list(500)
     return [
-        {"email": d["email"], "product_id": d.get("product_id"), "created_at": d.get("created_at")}
+        {"email": d["email"], "product_id": d.get("product_id"),
+         "note": d.get("note", ""), "created_at": d.get("created_at")}
         for d in docs
     ]
 
@@ -895,6 +944,7 @@ async def startup():
     await db.checkout_sessions.create_index("invoice_id")
     await db.webhook_events.create_index("event_key", unique=True)
     await db.coupons.create_index("code", unique=True)
+    await db.coupon_redemptions.create_index([("code", 1), ("email", 1)], unique=True)
 
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]

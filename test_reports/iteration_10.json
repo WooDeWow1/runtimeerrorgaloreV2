@@ -1,0 +1,53 @@
+{
+  "summary": "Full backend + frontend verification of iteration-10 features: fixed-amount coupons, one-per-customer coupon limit, admin waitlist view, pokeball favicon; plus the auth playbook checks. New pytest suites: /app/backend/tests/test_coupons_v2.py (21 tests) and /app/backend/tests/test_auth_playbook_v2.py (11 tests). Existing regression suite backend_test.py re-run: 89/89 passed. Playwright: admin login -> coupons tab (create fixed $10 coupon, create 15% coupon, HTML required validation on empty $ amount, row labels, cleanup via UI delete), waitlist tab (4 rows with email + source product name + date, filter by email and by product name, empty-state, CSV download 'waitlist-2026-08-19.csv'), and guest checkout (fixed coupon applied '$10.00 off', discount -$10.00, total $14.99 -> $4.99, remove restores $14.99, one-per-customer blocked for a redeemed email with inline error, allowed for a fresh email). Backend one-per-customer also verified at /api/orders/checkout and via a signed paid SellAuth webhook (coupon_redemptions row + used_count increment). Favicon /favicon.png returns 200 image and index.html references it. 3 tests fail, all genuine defects (see below).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/orders/checkout", "issue": "A fixed coupon >= cart subtotal makes total $0.00; SellAuth rejects with 422 'The cart total must be greater than 0 when all cart items are custom.' and the API returns a raw 502 (UI shows 'PAY $0.00' then a generic failure). Cap the discount at subtotal minus a minimum charge (e.g. $0.50) or reject with a friendly 400 before calling SellAuth. Repro: fixed $500-off coupon + one $14.99 bundle.", "priority": "HIGH"},
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout key is f\"{request.client.host}:{email}\" but request.client.host is the ingress pod IP (observed 10.79.139.10 and .11), so failed attempts are split across identifiers: lockout only fires on attempt 8-11 instead of 6, and a correct-password login still succeeded after a 429 because it landed on the other proxy IP. Also a successful login only clears the counter of the proxy IP that served it, leaving a stale counter that can lock the user out later. Fix: derive the client IP from X-Forwarded-For (first hop) or key the counter on email only.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "CORS middleware", "issue": "allow_origin_regex='.*' with allow_credentials=True reflects ANY origin (verified: Origin https://evil.example.com is echoed back with allow-credentials: true on uvicorn). Playbook requires explicit origins; CORS_ORIGINS in backend/.env is set to '*' and is not used at all."},
+      {"endpoint": "GET /api/admin/waitlist", "issue": "Returns product_id only; the product name is resolved client-side, so a deleted product renders as blank/undefined source. Consider joining the product name server-side."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Checkout - coupon + guest email", "issue": "An already-applied one-per-customer coupon is not re-validated when the guest email is changed afterwards, so a user can apply with email A and then switch to a previously-redeemed email B; the discount stays visible until /orders/checkout rejects it at pay time. Re-run validate (or clear the applied coupon) on email change.", "affected_selectors": ["guest-email-input", "applied-coupon", "checkout-total"]}
+    ],
+    "design_issues": [
+      {"screen": "Admin > Coupons", "issues": ["Fixed-amount validation relies only on the browser's native 'Please fill out this field' tooltip; no inline styled error like the rest of the console (cosmetic, submit is correctly blocked)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_coupons_v2.py",
+    "/app/backend/tests/test_auth_playbook_v2.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration10_results.xml",
+    "/app/test_reports/pytest/iteration10_regression.xml"
+  ],
+  "action_items": [
+    "Handle fixed coupons that cover the whole cart: cap discount to leave a minimum charge (or return 400 with a clear message) before calling SellAuth, and reflect it in the checkout total.",
+    "Fix brute-force lockout identifier: use X-Forwarded-For first hop (or email-only key) so 5 failures actually lock and a successful login clears all counters.",
+    "Restrict CORS to explicit origins instead of allow_origin_regex='.*' while allow_credentials=True (or wire CORS_ORIGINS from .env).",
+    "Re-validate/clear an applied coupon when the guest email changes on /checkout."
+  ],
+  "critical_code_review_comments": [
+    "apply_coupon() fixed branch: discount = min(amount_off, eligible_subtotal) is correct, but discount_label still shows the full face value ('$50.00 off') while only the capped amount is deducted - consider showing the effective discount to avoid confusion.",
+    "checkout() charge_items scaling floors the last eligible line at $0.01 only when drift != 0; with a 100% discount every line becomes $0.00 and SellAuth 422s (see critical issue).",
+    "server.py is 966 lines and now mixes auth, coupons, checkout, webhooks, waitlist and analytics - split into routers (coupons.py, checkout.py, admin.py) before it grows further.",
+    "coupon_redemptions has a unique (code,email) index and create_order_from_session upserts into it - good and idempotent; note the redemption is only recorded on paid promotion, so abandoned checkouts correctly do not consume the one-per-customer allowance.",
+    "/api/admin/waitlist projects fields explicitly so MongoDB _id is not leaked - good pattern, mirrored in the coupon endpoints."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_coupons_v2.py",
+    "/app/backend/tests/test_auth_playbook_v2.py"
+  ],
+  "success_rate": {"backend": "97% (118/121: 89/89 regression, 20/21 new coupon suite, 9/11 auth playbook)", "frontend": "100% of tested flows (admin coupons, admin waitlist, checkout coupon flows)"},
+  "seed_data_creation": "Created and deleted coupons TESTQAFIX1, TESTQAPCT1, TESTQAUIFIX, TESTQAUIONE, TESTQAFULL and per-test TESTQA* coupons; seeded/removed coupon_redemptions rows and a testqa waitlist signup; one simulated paid webhook order was created and deleted. Verified only TENOFF and SAVE20 (pre-existing, TENOFF is the main agent's smoke-test $10 coupon) remain.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (unchanged, not locked out). Guest checkout emails used: fresh_qa@example.com, used_qa@example.com, delivered@resend.dev.",
+  "context_for_next_testing_agent": "New suites: tests/test_coupons_v2.py (fixed coupons, caps, exclusions, one-per-customer via API/checkout/paid webhook, admin waitlist, favicon) and tests/test_auth_playbook_v2.py (bcrypt $2b$ hashes, httpOnly+Secure cookies, cookie-only auth, logout, CORS, lockout, seed_admin). 3 known failures are intentional documentation of real defects: TestFullDiscountCheckout (502 from SellAuth on 100% discount) and the two TestBruteForceLockout tests (per-proxy-IP identifier dilution). CORS must be asserted against http://localhost:8001 because the Cloudflare edge answers OPTIONS itself with ACAO '*'. UI notes: login uses data-testid login-email/login-password/login-submit (no button[type=submit]); adding to cart does NOT auto-open the drawer - click open-cart-btn; the first add-to-cart button on /products belongs to a locked Event Pass, filter to POKECOINS first; cart is in-memory so navigate to /checkout via the drawer's checkout-btn.",
+  "rca_of_the_issue": "1) Full-cart fixed discount: apply_coupon caps discount at eligible_subtotal so total becomes 0; checkout() then scales every eligible line by factor 0 and SellAuth's create_checkout rejects a $0 custom cart with 422, which the handler maps to 502. 2) Lockout dilution: login() builds the rate-limit identifier from request.client.host, which under the k8s ingress is the proxy pod IP; with N ingress replicas the effective threshold becomes ~5*N and a successful login clears only one of the N counters (proved with 10.79.139.10/.11 observed in the login_attempts collection)."
+}

@@ -15,6 +15,14 @@ export default function Checkout() {
   const { user } = useAuth();
   const isGuest = !user;
   const [email, setEmail] = useState("");
+  const onEmailChange = (e) => {
+    setEmail(e.target.value);
+    if (applied?.one_per_customer) {
+      setApplied(null);
+      setCoupon("");
+      setCouponError("Re-apply your discount code after changing your email.");
+    }
+  };
   const [ptcUsername, setPtcUsername] = useState("");
   const [ptcPassword, setPtcPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,9 +43,10 @@ export default function Checkout() {
       const { data } = await api.post("/coupons/validate", {
         code: coupon.trim(),
         items: cartPayload,
+        email: (user?.email || email || "").trim() || null,
       });
       setApplied(data);
-      toast.success(`${data.coupon_code} applied — ${data.percent_off}% off`, {
+      toast.success(`${data.coupon_code} applied — ${data.discount_label}`, {
         description:
           data.excluded_items.length > 0
             ? `Not valid on: ${data.excluded_items.join(", ")}`
@@ -114,7 +123,7 @@ export default function Checkout() {
               <div>
                 <label className={label}>Email (for order updates)</label>
                 <input data-testid="guest-email-input" className={input} type="email" value={email}
-                       onChange={(e) => setEmail(e.target.value)} required />
+                       onChange={onEmailChange} required />
                 <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
                   Checking out as a guest.{" "}
                   <Link to="/login" className="text-[#00ffcc] hover:underline">Sign in</Link>{" "}
@@ -198,7 +207,7 @@ export default function Checkout() {
                 className="flex items-center justify-between gap-3 border border-[#00ffcc]/50 bg-[#00ffcc]/[0.06] p-3"
               >
                 <span className="text-xs font-bold text-[#00ffcc]">
-                  {applied.coupon_code} · {applied.percent_off}% off
+                  {applied.coupon_code} · {applied.discount_label}
                 </span>
                 <button
                   type="button"

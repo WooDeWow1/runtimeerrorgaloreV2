@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Eye, KeyRound, Pencil, Plus, Star, Tag, Trash2 } from "lucide-react";
+import { BarChart3, Download, Eye, KeyRound, Pencil, Plus, Star, Tag, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, CATEGORY_LABELS, money, STATUS_LABELS } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -14,7 +14,8 @@ const EMPTY = {
 };
 
 const EMPTY_COUPON = {
-  code: "", percent_off: "", active: true, excluded_product_ids: [], excluded_categories: [],
+  code: "", discount_type: "percent", percent_off: "", amount_off: "", one_per_customer: false,
+  active: true, excluded_product_ids: [], excluded_categories: [],
   min_subtotal: "", max_uses: "", note: "",
 };
 
@@ -32,6 +33,37 @@ export default function Admin() {
   const [coupons, setCoupons] = useState([]);
   const [couponForm, setCouponForm] = useState(EMPTY_COUPON);
   const [editingCoupon, setEditingCoupon] = useState(null);
+  const [waitlist, setWaitlist] = useState([]);
+  const [waitlistQuery, setWaitlistQuery] = useState("");
+
+  const loadWaitlist = () =>
+    api.get("/admin/waitlist").then(({ data }) => setWaitlist(data)).catch(() => {});
+
+  const productName = (id) => products.find((p) => p.id === id)?.name || "General";
+
+  const filteredWaitlist = waitlist.filter((w) => {
+    const q = waitlistQuery.trim().toLowerCase();
+    if (!q) return true;
+    return w.email.toLowerCase().includes(q) || productName(w.product_id).toLowerCase().includes(q);
+  });
+
+  const exportWaitlist = () => {
+    const rows = [
+      ["email", "source", "signed_up"],
+      ...filteredWaitlist.map((w) => [
+        w.email,
+        productName(w.product_id),
+        w.created_at ? new Date(w.created_at).toISOString() : "",
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const loadCoupons = () => api.get("/admin/coupons").then(({ data }) => setCoupons(data)).catch(() => {});
 
@@ -48,6 +80,7 @@ export default function Admin() {
   useEffect(() => {
     if (tab === "settings") loadStats();
     if (tab === "coupons") loadCoupons();
+    if (tab === "waitlist") loadWaitlist();
   }, [tab]);
 
   const setCoupon = (k) => (e) =>
@@ -68,7 +101,12 @@ export default function Admin() {
     e.preventDefault();
     const payload = {
       code: couponForm.code.trim().toUpperCase(),
-      percent_off: parseFloat(couponForm.percent_off),
+      discount_type: couponForm.discount_type,
+      percent_off:
+        couponForm.discount_type === "percent" ? parseFloat(couponForm.percent_off) : null,
+      amount_off:
+        couponForm.discount_type === "fixed" ? parseFloat(couponForm.amount_off) : null,
+      one_per_customer: couponForm.one_per_customer,
       active: couponForm.active,
       excluded_product_ids: couponForm.excluded_product_ids,
       excluded_categories: couponForm.excluded_categories,
@@ -91,7 +129,12 @@ export default function Admin() {
   const editCoupon = (c) => {
     setEditingCoupon(c.id);
     setCouponForm({
-      code: c.code, percent_off: String(c.percent_off), active: c.active,
+      code: c.code,
+      discount_type: c.discount_type || "percent",
+      percent_off: c.percent_off == null ? "" : String(c.percent_off),
+      amount_off: c.amount_off == null ? "" : String(c.amount_off),
+      one_per_customer: !!c.one_per_customer,
+      active: c.active,
       excluded_product_ids: c.excluded_product_ids || [],
       excluded_categories: c.excluded_categories || [],
       min_subtotal: c.min_subtotal ?? "", max_uses: c.max_uses ?? "", note: c.note || "",
@@ -215,6 +258,7 @@ export default function Admin() {
           { key: "orders", label: "orders" },
           { key: "products", label: "products" },
           { key: "coupons", label: "coupons" },
+          { key: "waitlist", label: "waitlist" },
           { key: "settings", label: "settings & analytics" },
         ].map((t) => (
           <button
@@ -438,10 +482,30 @@ export default function Admin() {
                        value={couponForm.code} onChange={setCoupon("code")} />
               </div>
               <div>
-                <label className={label}>% off</label>
-                <input data-testid="coupon-percent-input" className={input} type="number" step="1" min="1" max="100"
-                       required value={couponForm.percent_off} onChange={setCoupon("percent_off")} />
+                <label className={label}>Discount type</label>
+                <select
+                  data-testid="coupon-type-select"
+                  className={input}
+                  value={couponForm.discount_type}
+                  onChange={setCoupon("discount_type")}
+                >
+                  <option value="percent">Percent %</option>
+                  <option value="fixed">Fixed $</option>
+                </select>
               </div>
+              {couponForm.discount_type === "percent" ? (
+                <div>
+                  <label className={label}>% off</label>
+                  <input data-testid="coupon-percent-input" className={input} type="number" step="1" min="1" max="100"
+                         required value={couponForm.percent_off} onChange={setCoupon("percent_off")} />
+                </div>
+              ) : (
+                <div>
+                  <label className={label}>$ off</label>
+                  <input data-testid="coupon-amount-input" className={input} type="number" step="0.01" min="0.01"
+                         required value={couponForm.amount_off} onChange={setCoupon("amount_off")} />
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -506,6 +570,12 @@ export default function Admin() {
             </div>
 
             <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+              <input data-testid="coupon-one-per-customer-checkbox" type="checkbox"
+                     checked={couponForm.one_per_customer} onChange={setCoupon("one_per_customer")} />
+              One per customer
+            </label>
+
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
               <input data-testid="coupon-active-checkbox" type="checkbox" checked={couponForm.active}
                      onChange={setCoupon("active")} />
               Active
@@ -536,12 +606,19 @@ export default function Admin() {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <p className="font-display text-base text-[#00ffcc]">
-                      {c.code} <span className="text-white">· {c.percent_off}% off</span>
+                      {c.code}{" "}
+                      <span className="text-white">
+                        ·{" "}
+                        {c.discount_type === "fixed"
+                          ? `${money(c.amount_off)} off`
+                          : `${c.percent_off}% off`}
+                      </span>
                     </p>
                     <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                       {c.active ? "Active" : "Disabled"} · used {c.used_count}
                       {c.max_uses ? `/${c.max_uses}` : ""}
                       {c.min_subtotal ? ` · min ${money(c.min_subtotal)}` : ""}
+                      {c.one_per_customer ? " · 1 per customer" : ""}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -568,6 +645,64 @@ export default function Admin() {
                   </p>
                 )}
                 {c.note && <p className="mt-2 text-[10px] text-zinc-600">{c.note}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "waitlist" && (
+        <div className="mt-10" data-testid="waitlist-panel">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="flex items-center gap-2 font-display text-sm uppercase tracking-[0.2em]">
+                <Users className="h-4 w-4 text-[#00ffcc]" /> Waitlist
+                <span className="text-zinc-500">· {waitlist.length}</span>
+              </h2>
+              <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+                Everyone who asked to be notified when a coming-soon drop goes live.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <input
+                data-testid="waitlist-search-input"
+                className={`${input} w-52`}
+                placeholder="Search email or product"
+                value={waitlistQuery}
+                onChange={(e) => setWaitlistQuery(e.target.value)}
+              />
+              <button
+                data-testid="waitlist-export-btn"
+                onClick={exportWaitlist}
+                disabled={filteredWaitlist.length === 0}
+                className="flex items-center gap-2 border border-[#00ffcc] px-4 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:opacity-40"
+              >
+                <Download className="h-3 w-3" /> CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-8 space-y-3" data-testid="waitlist-list">
+            {filteredWaitlist.length === 0 && (
+              <p data-testid="waitlist-empty" className="text-xs text-zinc-600">
+                No waitlist signups yet.
+              </p>
+            )}
+            {filteredWaitlist.map((w) => (
+              <div
+                key={`${w.email}-${w.product_id}`}
+                data-testid={`waitlist-row-${w.email}`}
+                className="flex flex-wrap items-center justify-between gap-3 border border-[#1f1f1f] bg-[#0a0a0a] p-4"
+              >
+                <div>
+                  <p className="font-mono text-xs text-white">{w.email}</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                    {productName(w.product_id)}
+                  </p>
+                </div>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+                  {w.created_at ? new Date(w.created_at).toLocaleString() : "—"}
+                </span>
               </div>
             ))}
           </div>

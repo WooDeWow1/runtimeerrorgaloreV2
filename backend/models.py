@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, List, Literal, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
@@ -130,7 +130,10 @@ class FeaturedUpdate(BaseModel):
 
 class CouponIn(BaseModel):
     code: str = Field(min_length=3, max_length=32)
-    percent_off: float = Field(gt=0, le=100)
+    discount_type: Literal["percent", "fixed"] = "percent"
+    percent_off: Optional[float] = Field(default=None, gt=0, le=100)
+    amount_off: Optional[float] = Field(default=None, gt=0)
+    one_per_customer: bool = False
     active: bool = True
     excluded_product_ids: List[str] = Field(default_factory=list)
     excluded_categories: List[str] = Field(default_factory=list)
@@ -142,7 +145,10 @@ class CouponIn(BaseModel):
 
 class Coupon(BaseDocument):
     code: str
-    percent_off: float
+    discount_type: str = "percent"
+    percent_off: Optional[float] = None
+    amount_off: Optional[float] = None
+    one_per_customer: bool = False
     active: bool = True
     excluded_product_ids: List[str] = Field(default_factory=list)
     excluded_categories: List[str] = Field(default_factory=list)
@@ -157,6 +163,7 @@ class Coupon(BaseDocument):
 class CouponValidateRequest(BaseModel):
     code: str
     items: List["CartItemIn"]
+    email: Optional[str] = None
 
 
 class MessageIn(BaseModel):
