@@ -33,6 +33,9 @@ UI: premium dark-mode hacker-forum gaming aesthetic with Snorlax / Gengar / Psyd
 - 2026-06: rebrand to PokeCoins (header, tab title, footer © 2026 PokeCoins.cc, email sender, API), new hero subtitle; public 'Orders' nav link removed (all-orders list is admin-only); checkout 'How it works' info card
 - 2026-06: `medals` (Platinum Medals) category with MSRP-vs-price display; dedicated `/products` catalog with filter tabs; dedicated `/about` page; public `POST /api/waitlist` + admin `GET /api/admin/waitlist`; nav = Store / Products / About Us / Cart (+ Admin for admins)
 - 2026-06: SellAuth Checkout API confirmed LIVE — real hosted checkout URLs are now returned (invoice ids stored on the session for webhook matching)
+- 2026-06: all artwork localised to `frontend/public/images` (no CDN dependency) via `scripts/download_images.py` + `scripts/migrate_product_images.py`; new hero art `Mainpage.jpg`
+- 2026-06: Vercel build fixes in `frontend/package.json` — date-fns 3.6.0, react-day-picker 9.11.1 (React 19 support), ajv 8.17.1 + ajv-keywords 5.1.0 devDeps, npm `overrides` using `$name` refs; `ui/calendar.jsx` migrated to react-day-picker v9 API. Clean `npm install` + `craco build` both pass
+- 2026-06: `stardust` category with 1M/5M/10M Stardust Farming products; Admin third tab "Settings & Analytics" with bcrypt password change (`POST /api/auth/change-password`, sets `password_self_managed` so the env seed no longer overwrites it) and lightweight visitor analytics (`POST /api/track` upserts one row per IP per day with hit counter, 90-day TTL, country cached per IP in `ip_geo` via ip-api.com; `GET /api/admin/analytics`)
 
 ## Backlog
 - P1: confirm the real SellAuth webhook payload shape on a live paid invoice and tighten field mapping

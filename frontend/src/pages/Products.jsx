@@ -8,6 +8,7 @@ const TABS = [
   { key: "pokecoin_bundle", label: "PokéCoins" },
   { key: "event_pass", label: "Event Passes" },
   { key: "medals", label: "Platinum Medals" },
+  { key: "stardust", label: "Stardust" },
   { key: "shundo_service", label: "Shundo Hunting (Waitlist)" },
 ];
 

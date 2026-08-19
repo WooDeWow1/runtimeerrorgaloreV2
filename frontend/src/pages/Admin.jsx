@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { BarChart3, Eye, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, CATEGORY_LABELS, money, STATUS_LABELS } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -21,15 +21,44 @@ export default function Admin() {
   const [openOrder, setOpenOrder] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState(null);
+  const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm: "" });
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [stats, setStats] = useState(null);
 
   const loadOrders = () => api.get("/admin/orders").then(({ data }) => setOrders(data)).catch(() => {});
   const loadProducts = () =>
     api.get("/products", { params: { include_inactive: true } }).then(({ data }) => setProducts(data)).catch(() => {});
+  const loadStats = () => api.get("/admin/analytics").then(({ data }) => setStats(data)).catch(() => {});
 
   useEffect(() => {
     loadOrders();
     loadProducts();
   }, []);
+
+  useEffect(() => {
+    if (tab === "settings") loadStats();
+  }, [tab]);
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    if (pwd.new_password !== pwd.confirm) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      await api.post("/auth/change-password", {
+        current_password: pwd.current_password,
+        new_password: pwd.new_password,
+      });
+      toast.success("Password updated", { description: "Use your new password next time you sign in." });
+      setPwd({ current_password: "", new_password: "", confirm: "" });
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setPwdBusy(false);
+    }
+  };
 
   const setStatus = async (id, status) => {
     try {
@@ -99,17 +128,21 @@ export default function Admin() {
       <p className="text-[10px] uppercase tracking-[0.3em] text-[#00ffcc]">// operator console</p>
       <h1 className="mt-4 font-display text-3xl tracking-tighter">Admin</h1>
 
-      <div className="mt-10 flex gap-3">
-        {["orders", "products"].map((t) => (
+      <div className="mt-10 flex flex-wrap gap-3">
+        {[
+          { key: "orders", label: "orders" },
+          { key: "products", label: "products" },
+          { key: "settings", label: "settings & analytics" },
+        ].map((t) => (
           <button
-            key={t}
-            data-testid={`admin-tab-${t}`}
-            onClick={() => setTab(t)}
+            key={t.key}
+            data-testid={`admin-tab-${t.key}`}
+            onClick={() => setTab(t.key)}
             className={`border px-5 py-2 text-[10px] uppercase tracking-[0.25em] transition-colors ${
-              tab === t ? "border-[#00ffcc] text-[#00ffcc]" : "border-zinc-800 text-zinc-500 hover:text-white"
+              tab === t.key ? "border-[#00ffcc] text-[#00ffcc]" : "border-zinc-800 text-zinc-500 hover:text-white"
             }`}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
@@ -279,6 +312,124 @@ export default function Admin() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div className="mt-10 grid gap-10 lg:grid-cols-12">
+          <form
+            onSubmit={changePassword}
+            data-testid="password-form"
+            className="space-y-4 border border-[#1f1f1f] bg-[#0a0a0a] p-6 lg:col-span-5"
+          >
+            <h2 className="flex items-center gap-2 font-display text-sm uppercase tracking-[0.2em]">
+              <KeyRound className="h-4 w-4 text-[#00ffcc]" /> Admin password
+            </h2>
+            <div>
+              <label className={label}>Current password</label>
+              <input data-testid="current-password-input" className={input} type="password" required
+                     autoComplete="current-password" value={pwd.current_password}
+                     onChange={(e) => setPwd({ ...pwd, current_password: e.target.value })} />
+            </div>
+            <div>
+              <label className={label}>New password (min 8 chars)</label>
+              <input data-testid="new-password-input" className={input} type="password" required minLength={8}
+                     autoComplete="new-password" value={pwd.new_password}
+                     onChange={(e) => setPwd({ ...pwd, new_password: e.target.value })} />
+            </div>
+            <div>
+              <label className={label}>Confirm new password</label>
+              <input data-testid="confirm-password-input" className={input} type="password" required minLength={8}
+                     autoComplete="new-password" value={pwd.confirm}
+                     onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} />
+            </div>
+            <button
+              data-testid="save-password-btn"
+              disabled={pwdBusy}
+              className="w-full border border-[#00ffcc] py-3 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:opacity-50"
+            >
+              {pwdBusy ? "Updating…" : "Update password"}
+            </button>
+            <p className="text-[10px] leading-relaxed text-zinc-600">
+              Hashed with bcrypt before storage. Once changed here, the value stays put and is no longer
+              overwritten by the seed variables on restart.
+            </p>
+          </form>
+
+          <div className="space-y-8 lg:col-span-7">
+            <div>
+              <h2 className="flex items-center gap-2 font-display text-sm uppercase tracking-[0.2em]">
+                <BarChart3 className="h-4 w-4 text-[#00ffcc]" /> Traffic
+              </h2>
+              <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                {[
+                  ["Unique visitors", stats?.totals.unique_visitors],
+                  ["Visits today", stats?.totals.visits_today],
+                  ["Page hits", stats?.totals.total_hits],
+                  ["Orders", stats?.totals.orders],
+                  ["Revenue", stats ? money(stats.totals.revenue) : null],
+                  ["Waitlist", stats?.totals.waitlist],
+                ].map(([k, v]) => (
+                  <div key={k} data-testid={`stat-${k.toLowerCase().replace(/ /g, "-")}`}
+                       className="border border-[#1f1f1f] bg-[#0a0a0a] p-4">
+                    <p className="font-display text-xl text-[#00ffcc]">{v ?? "—"}</p>
+                    <p className="mt-1 text-[9px] uppercase tracking-[0.2em] text-zinc-500">{k}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {stats?.top_countries?.length > 0 && (
+              <div className="flex flex-wrap gap-3" data-testid="top-countries">
+                {stats.top_countries.map((c) => (
+                  <span key={c.country} className="border border-zinc-800 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+                    {c.country} · {c.visitors}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="border border-[#1f1f1f] bg-[#0a0a0a]" data-testid="visitors-table">
+              <div className="flex items-center justify-between border-b border-[#1f1f1f] px-5 py-3">
+                <p className="text-[10px] uppercase tracking-[0.25em] text-zinc-500">Recent visitors</p>
+                <button data-testid="refresh-analytics-btn" onClick={loadStats}
+                        className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 hover:text-[#00ffcc]">
+                  Refresh
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="text-[9px] uppercase tracking-[0.2em] text-zinc-600">
+                      <th className="px-5 py-3 font-normal">Visitor IP</th>
+                      <th className="px-5 py-3 font-normal">Date / time</th>
+                      <th className="px-5 py-3 font-normal">Country</th>
+                      <th className="px-5 py-3 font-normal">Hits</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(stats?.visits || []).map((v) => (
+                      <tr key={`${v.ip}-${v.last_seen}`} data-testid="visitor-row" className="border-t border-zinc-900">
+                        <td className="px-5 py-3 font-mono text-[#00ffcc]">{v.ip}</td>
+                        <td className="px-5 py-3 text-zinc-400">
+                          {v.last_seen ? new Date(v.last_seen).toLocaleString() : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-zinc-300">{v.country}</td>
+                        <td className="px-5 py-3 text-zinc-500">{v.hits}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {stats && stats.visits.length === 0 && (
+                  <p data-testid="no-visitors" className="px-5 py-6 text-xs text-zinc-600">No visits logged yet.</p>
+                )}
+              </div>
+            </div>
+            <p className="text-[10px] leading-relaxed text-zinc-600">
+              One row per IP per day (hits counted), country cached per IP via ip-api.com, rows auto-expire
+              after 90 days — keeps the collection tiny.
+            </p>
           </div>
         </div>
       )}

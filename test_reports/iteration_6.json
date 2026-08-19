@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 6 verified the new Stardust category, /api/auth/change-password endpoint, /api/track visitor logging + geolocation, and /api/admin/analytics. Also verified the Admin third tab 'settings & analytics' with password form + analytics table on both desktop and mobile. Backend pytest: 55/56 passed (the sole failing test — TestMedalsCategory.test_seeded_medals_present_with_msrp — is unrelated to this iteration; the medals seed now contains only 1 product 'Size Matters – 3x Platinum Medal Bundle' instead of the original two, so the assertion `>=2` no longer matches the seed data). Admin password was changed to a temporary value during testing and then restored to 'admin' via a direct bcrypt update with $unset of password_self_managed — verified admin login with 'admin' still works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/products (medals seed)", "issue": "Medals seed currently has only ONE product ('Size Matters – 3x Platinum Medal Bundle'); the pre-existing regression test expected >=2 medals with msrp. Either update the seed to include a second medal or update the test assertion. Not blocking — no other test depends on medals count."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional: reconcile medals seed with the pre-existing regression test — either restore the second medals product or relax the >=2 assertion to >=1."
+  ],
+  "critical_code_review_comments": [
+    "server.py CATEGORIES now includes 'stardust'; SEED_PRODUCTS seeds three stardust products with correct prices/MSRPs (19.99/39.99, 79.99/159.99, 139.99/299.99) — verified via GET /api/products.",
+    "server.py change_password() correctly (a) verifies current password, (b) rejects reused password with 400, (c) bcrypt-hashes new password, (d) sets password_self_managed:true — verified in MongoDB user document ($2b$ hash prefix).",
+    "startup admin seed correctly SKIPS reseeding when password_self_managed is set — validated by the restore-flow test.",
+    "server.py /api/track: single upsert per (ip,day) with $inc hits — 3 calls from same IP produced exactly 1 doc with hits>=3. Unique compound index (ip,day) + TTL on expires_at are created in startup.",
+    "lookup_country() caches per IP in db.ip_geo; private IPs (10.x, 127.x, 192.168.x, 172.x) short-circuit to 'Unknown' without calling ip-api.com — verified non-fatal even when public IP lookup returns Unknown due to rate limits.",
+    "/api/admin/analytics returns proper 401 (no token) / 403 (customer) / 200 (admin) with totals, top_countries and visits array — verified.",
+    "Admin.jsx third tab data-testid='admin-tab-settings' label 'settings & analytics' present; password-form, current/new/confirm inputs, save-password-btn, visitors-table, refresh-analytics-btn, stat-unique-visitors, top-countries all present.",
+    "useVisitTracker.js correctly uses sessionStorage key 'pokecoins_tracked_session' and useRef to fire only once per browser session — verified key set to '1' after first mount.",
+    "Cart validation: Stardust alone does NOT unlock Event Passes — POST /api/orders/checkout with stardust+event_pass (no bundle) correctly returns 400 ('An Event Pass requires at least one Pokécoin Bundle...').",
+    "SellAuth is now live: guest checkout returns 200 with checkout_url (updated old plan-gate test that expected 503 to a live-mode expectation)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py — added TestCheckoutLive, TestStardustCategory, TestStardustCart, TestPasswordChange, TestVisitorTracking, TestAnalytics classes (18 new tests) and test_zz_restore_admin_password teardown that restores admin/admin via direct bcrypt+unset password_self_managed"
+  ],
+  "success_rate": {"backend": "98% (55/56, one pre-existing medals seed count assertion unrelated to this iteration)", "frontend": "100% (all Stardust + Admin settings tab + analytics + password mismatch flows verified on desktop 1920x1080 and mobile 390x844)"},
+  "test_credentials": "Admin: officialwifi@icloud.com / admin (RESTORED at end of test session). Customer created per-session via /api/auth/register.",
+  "seed_data_creation": "Tests insert transient checkout_sessions/waitlist/visits/ip_geo docs and clean them up (unique IPs and TEST_ prefixed product names deleted after use). No production data was mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression suite lives at /app/backend/tests/backend_test.py (56 tests). Run with `pytest backend/tests/backend_test.py -v -n 0`. Admin/admin credentials are restored automatically by the final test_zz_restore_admin_password teardown — do not remove that test. SellAuth Checkout API is live (200 + checkout_url); orders are still only created via signed SellAuth webhook. Tests avoid hitting the 5-failed-login admin lockout by using throwaway customer accounts for negative auth cases. All new iteration-6 features (Stardust category, /api/auth/change-password, /api/track with ip-api.com geolocation cache, /api/admin/analytics, Admin third tab UI) verified end-to-end.",
+  "rca of the issue": "TestMedalsCategory.test_seeded_medals_present_with_msrp fails because the medals seed was reduced to a single 'Size Matters – 3x Platinum Medal Bundle' entry. The test still asserts len(medals) >= 2. This is a seed/test-data drift, not a functional regression — /api/products still returns medals with correct msrp>price. Mitigation: either reintroduce a second seeded medal (e.g. the previous Single Badge or Full Set Grind) or lower the assertion to >=1."
+}

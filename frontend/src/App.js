@@ -6,6 +6,7 @@ import { CartProvider } from "@/context/CartContext";
 import { Navbar } from "@/components/Navbar";
 import { CartDrawer } from "@/components/CartDrawer";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { useVisitTracker } from "@/hooks/useVisitTracker";
 import Home from "@/pages/Home";
 import Products from "@/pages/Products";
 import About from "@/pages/About";
@@ -19,6 +20,7 @@ import OrderDetail from "@/pages/OrderDetail";
 import Admin from "@/pages/Admin";
 
 function App() {
+  useVisitTracker();
   return (
     <div className="App min-h-screen bg-[#050505] text-white">
       <BrowserRouter>

@@ -11,6 +11,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
+import httpx  # noqa: E402
 import jwt  # noqa: E402
 from bson import ObjectId  # noqa: E402
 from bson.errors import InvalidId  # noqa: E402
@@ -28,6 +29,7 @@ from models import (  # noqa: E402
     Notification,
     Order,
     OrderItem,
+    PasswordChangeRequest,
     Product,
     ProductIn,
     RegisterRequest,
@@ -176,6 +178,21 @@ async def login(payload: LoginRequest, request: Request, response: Response):
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
+
+
+@api.post("/auth/change-password")
+async def change_password(payload: PasswordChangeRequest, user: dict = Depends(get_current_user)):
+    if not verify_password(payload.current_password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different")
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password),
+                  "password_self_managed": True,
+                  "password_changed_at": utc_now()}},
+    )
     return {"ok": True}
 
 
@@ -559,6 +576,82 @@ async def mark_notifications_read(user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------------- Visitor analytics (lightweight) ----------------
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def lookup_country(ip: str) -> str:
+    cached = await db.ip_geo.find_one({"_id": ip})
+    if cached:
+        return cached.get("country", "Unknown")
+    country = "Unknown"
+    if not (ip == "unknown" or ip.startswith(("10.", "127.", "192.168.", "172."))):
+        try:
+            async with httpx.AsyncClient(timeout=4) as http:
+                resp = await http.get(f"http://ip-api.com/json/{ip}", params={"fields": "status,country"})
+            data = resp.json()
+            if data.get("status") == "success":
+                country = data.get("country") or "Unknown"
+        except Exception as exc:
+            logger.info("Geo lookup failed for %s: %s", ip, exc)
+    await db.ip_geo.update_one({"_id": ip}, {"$set": {"country": country}}, upsert=True)
+    return country
+
+
+@api.post("/track")
+async def track_visit(request: Request):
+    """One lightweight row per IP per day: keeps the collection tiny."""
+    ip = client_ip(request)
+    day = utc_now().strftime("%Y-%m-%d")
+    country = await lookup_country(ip)
+    await db.visits.update_one(
+        {"ip": ip, "day": day},
+        {"$set": {"ip": ip, "day": day, "country": country, "last_seen": utc_now()},
+         "$setOnInsert": {"first_seen": utc_now(), "expires_at": utc_now() + timedelta(days=90)},
+         "$inc": {"hits": 1}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.get("/admin/analytics")
+async def analytics(admin: dict = Depends(get_admin_user)):
+    visits = await db.visits.find().sort("last_seen", -1).to_list(200)
+    countries: dict[str, int] = {}
+    for v in visits:
+        countries[v.get("country", "Unknown")] = countries.get(v.get("country", "Unknown"), 0) + 1
+    today = utc_now().strftime("%Y-%m-%d")
+    return {
+        "totals": {
+            "unique_visitors": len({v["ip"] for v in visits}),
+            "visits_today": sum(1 for v in visits if v.get("day") == today),
+            "total_hits": sum(v.get("hits", 0) for v in visits),
+            "orders": await db.orders.count_documents({}),
+            "revenue": round(
+                sum(o.get("total", 0) for o in await db.orders.find({}, {"total": 1}).to_list(1000)), 2
+            ),
+            "waitlist": await db.waitlist.count_documents({}),
+        },
+        "top_countries": sorted(
+            [{"country": c, "visitors": n} for c, n in countries.items()],
+            key=lambda x: -x["visitors"],
+        )[:8],
+        "visits": [
+            {
+                "ip": v["ip"],
+                "country": v.get("country", "Unknown"),
+                "hits": v.get("hits", 1),
+                "last_seen": v.get("last_seen"),
+            }
+            for v in visits[:100]
+        ],
+    }
+
+
 # ---------------- Waitlist ----------------
 @api.post("/waitlist")
 async def join_waitlist(payload: WaitlistIn):
@@ -622,6 +715,18 @@ SEED_PRODUCTS = [
      "description": "Full sweep of the medal board to Platinum, handled by our operator fleet across multiple sessions.",
      "category": "medals", "price": 99.99, "msrp": 199.99, "badge": "BEST VALUE",
      "image_url": "/images/platinum-medal-set.jpg"},
+    {"name": "1M Stardust Farming",
+     "description": "Operator-farmed 1,000,000 Stardust delivered to your account. Ideal for a few second moves and trades.",
+     "category": "stardust", "price": 19.99, "msrp": 39.99, "badge": "STARTER",
+     "image_url": "/images/stardust.jpg"},
+    {"name": "5M Stardust Farming",
+     "description": "5,000,000 Stardust farmed across dedicated sessions. Enough to power up a full raid squad.",
+     "category": "stardust", "price": 79.99, "msrp": 159.99, "badge": "POPULAR",
+     "image_url": "/images/stardust.jpg"},
+    {"name": "10M Stardust Farming",
+     "description": "10,000,000 Stardust bulk farm. Our biggest dust drop — second moves, trades and max PvP builds covered.",
+     "category": "stardust", "price": 139.99, "msrp": 299.99, "badge": "MAX",
+     "image_url": "/images/stardust.jpg"},
     {"name": "Shundo Hunt — Community Day Background Target",
      "description": "Operators run your account in the background all Community Day, chasing the featured shiny-hundo while you go about your day. Launching soon.",
      "category": "shundo_service", "price": 79.99, "badge": "COMING SOON", "coming_soon": True,
@@ -637,6 +742,8 @@ async def startup():
     await db.messages.create_index("order_id")
     await db.notifications.create_index("user_id")
     await db.checkout_sessions.create_index("expires_at", expireAfterSeconds=0)
+    await db.visits.create_index("expires_at", expireAfterSeconds=0)
+    await db.visits.create_index([("ip", 1), ("day", 1)], unique=True)
     await db.checkout_sessions.create_index("invoice_id")
     await db.webhook_events.create_index("event_key", unique=True)
 
@@ -649,8 +756,11 @@ async def startup():
             "name": "Forge Admin", "role": "admin", "created_at": utc_now(),
         })
     elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one({"email": admin_email},
-                                  {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}})
+        if existing.get("password_self_managed"):
+            logger.info("Admin password was changed in-app; skipping env reseed.")
+        else:
+            await db.users.update_one({"email": admin_email},
+                                      {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}})
 
     if await db.products.count_documents({}) == 0:
         for entry in SEED_PRODUCTS:

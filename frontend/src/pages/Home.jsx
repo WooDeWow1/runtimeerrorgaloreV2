@@ -132,6 +132,18 @@ export default function Home() {
           ))}
         </div>
 
+        <div className="mb-12 mt-24 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
+          <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
+            {CATEGORY_LABELS.stardust}
+          </h2>
+          <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">Farmed by operators</span>
+        </div>
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
+          {byCat("stardust").map((p) => (
+            <ProductCard key={p.id} product={p} />
+          ))}
+        </div>
+
         <div className="mt-16 flex justify-center">
           <Link
             to="/products"

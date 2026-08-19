@@ -6,7 +6,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
 PyObjectId = Annotated[str, BeforeValidator(lambda v: str(v) if isinstance(v, ObjectId) else v)]
 
-CATEGORIES = ["pokecoin_bundle", "event_pass", "medals", "shundo_service"]
+CATEGORIES = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"]
 ORDER_STATUSES = ["awaiting_payment", "pending", "processing", "completed", "cancelled"]
 
 
@@ -144,3 +144,8 @@ class WaitlistIn(BaseModel):
     email: EmailStr
     product_id: Optional[str] = None
     note: str = ""
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)

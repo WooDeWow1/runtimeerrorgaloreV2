@@ -34,6 +34,7 @@ export const CATEGORY_LABELS = {
   pokecoin_bundle: "Pokécoin Bundles",
   event_pass: "Event Passes",
   medals: "Platinum Medals",
+  stardust: "Stardust",
   shundo_service: "Shundo Hunting Services",
 };
 

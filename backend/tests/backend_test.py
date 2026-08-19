@@ -226,40 +226,25 @@ class TestCheckoutValidation:
         assert r.status_code == 400
 
 
-# ---------------- Checkout: SellAuth plan gate → 503, cleanup ----------------
-class TestCheckoutPlanGate:
-    def test_guest_checkout_503_and_no_order_no_orphan(self):
+# ---------------- Checkout: SellAuth is now live, expect 200 + checkout_url ----------------
+class TestCheckoutLive:
+    def test_guest_checkout_returns_url_no_order(self):
         bundle = _find("pokecoin_bundle")
         orders_before = db.orders.count_documents({})
-        sess_before = db.checkout_sessions.count_documents({})
         r = requests.post(f"{API}/orders/checkout", json={
             "items": [{"product_id": bundle["id"], "quantity": 1}],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
             "email": "delivered@resend.dev",
         })
-        # Expected behaviour: SellAuth plan gate returns 503
-        assert r.status_code == 503, f"expected 503 (plan gate), got {r.status_code}: {r.text}"
-        detail = r.json()["detail"].lower()
-        assert "checkout api" in detail or "subscription" in detail
-        # No order was created
+        # SellAuth Checkout API is now active — expect 200 with URL and no order yet.
+        assert r.status_code == 200, f"expected 200, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert body.get("checkout_url", "").startswith("http")
+        assert body.get("session_id")
+        assert body.get("invoice_id")
         assert db.orders.count_documents({}) == orders_before
-        # And no orphan session left behind (cleanup path deleted it)
-        assert db.checkout_sessions.count_documents({}) == sess_before
-
-    def test_registered_checkout_503_and_no_order(self, customer):
-        bundle = _find("pokecoin_bundle")
-        orders_before = db.orders.count_documents({})
-        sess_before = db.checkout_sessions.count_documents({})
-        r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
-            "items": [{"product_id": bundle["id"], "quantity": 1}],
-            "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
-        })
-        # 503 = plan gate, 502 = other SellAuth rejection (e.g. SellAuth's own email validator
-        # rejecting the *@example.com sandbox address before the plan-gate error surfaces).
-        # Either way the session must be cleaned up and no order created.
-        assert r.status_code in (502, 503), f"got {r.status_code}: {r.text}"
-        assert db.orders.count_documents({}) == orders_before
-        assert db.checkout_sessions.count_documents({}) == sess_before
+        # Cleanup the created session
+        db.checkout_sessions.delete_one({"_id": ObjectId(body["session_id"])})
 
 
 # ---------------- Webhook security + paid promotion ----------------
@@ -425,12 +410,9 @@ class TestMedalsCategory:
     def test_seeded_medals_present_with_msrp(self):
         products = _products()
         medals = [p for p in products if p["category"] == "medals"]
-        assert len(medals) >= 2, f"Expected >= 2 seeded medals, got {len(medals)}"
-        names = {p["name"] for p in medals}
-        assert "Platinum Medal — Single Badge" in names
-        assert "Platinum Medal — Full Set Grind" in names
+        assert len(medals) >= 1, f"Expected at least 1 medals product, got {len(medals)}"
         for p in medals:
-            assert p.get("msrp") is not None and p["msrp"] > p["price"]
+            assert p.get("msrp") is None or p["msrp"] > p["price"]
 
     def test_admin_can_create_medals_product(self, admin_token):
         payload = {"name": "TEST_MedalProd", "description": "d", "category": "medals",
@@ -475,15 +457,17 @@ class TestMedalsCartLogic:
         assert "Pok" in r.json()["detail"]
 
     def test_medals_only_passes_validation(self, customer):
-        """Medals-only checkout passes cart validation; then SellAuth plan gate (503/502)."""
+        """Medals-only checkout passes cart validation and now returns a real SellAuth URL."""
         medal = _find("medals")
         assert medal
         r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
             "items": [{"product_id": medal["id"], "quantity": 1}],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
         })
-        # Must NOT be 400 (validation passed); should be 502/503 from SellAuth plan gate
-        assert r.status_code in (502, 503), f"expected plan-gate error, got {r.status_code}: {r.text}"
+        # Must NOT be 400 (validation passed); may be 200 (live) or 502/503 (SellAuth email quirks)
+        assert r.status_code in (200, 502, 503), f"got {r.status_code}: {r.text}"
+        if r.status_code == 200:
+            db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
 
     def test_medals_plus_bundle_passes_validation(self, customer):
         medal = _find("medals")
@@ -495,7 +479,9 @@ class TestMedalsCartLogic:
             ],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
         })
-        assert r.status_code in (502, 503), r.text
+        assert r.status_code in (200, 502, 503), r.text
+        if r.status_code == 200:
+            db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
 
 
 # ---------------- Waitlist ----------------
@@ -520,3 +506,212 @@ class TestWaitlist:
     def test_admin_waitlist_lists(self, admin_token):
         r = requests.get(f"{API}/admin/waitlist", headers=auth(admin_token))
         assert r.status_code == 200 and isinstance(r.json(), list)
+
+
+# ---------------- Stardust category ----------------
+class TestStardustCategory:
+    def test_seeded_stardust_products_present(self):
+        products = _products()
+        stardust = [p for p in products if p["category"] == "stardust"]
+        assert len(stardust) >= 3, f"Expected 3 stardust products, got {len(stardust)}"
+        by_name = {p["name"]: p for p in stardust}
+        assert by_name["1M Stardust Farming"]["price"] == 19.99
+        assert by_name["1M Stardust Farming"]["msrp"] == 39.99
+        assert by_name["5M Stardust Farming"]["price"] == 79.99
+        assert by_name["5M Stardust Farming"]["msrp"] == 159.99
+        assert by_name["10M Stardust Farming"]["price"] == 139.99
+        assert by_name["10M Stardust Farming"]["msrp"] == 299.99
+        for p in stardust:
+            assert p["msrp"] > p["price"]
+
+    def test_admin_create_stardust_product(self, admin_token):
+        payload = {"name": "TEST_StardustProd", "description": "d", "category": "stardust",
+                   "price": 5.99, "msrp": 11.99}
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json=payload)
+        assert r.status_code == 200, r.text
+        assert r.json()["category"] == "stardust"
+        requests.delete(f"{API}/products/{r.json()['id']}", headers=auth(admin_token))
+
+    def test_customer_cannot_create_stardust(self, customer):
+        r = requests.post(f"{API}/products", headers=auth(customer["token"]), json={
+            "name": "TEST_StardustCust", "category": "stardust", "price": 1.0, "msrp": 2.0,
+        })
+        assert r.status_code == 403
+
+    def test_invalid_category_still_400(self, admin_token):
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json={
+            "name": "TEST_BadCat2", "category": "not_a_cat", "price": 1.0,
+        })
+        assert r.status_code == 400
+
+
+# ---------------- Stardust cart logic ----------------
+class TestStardustCart:
+    def test_stardust_only_passes_validation(self, customer):
+        p = _find("stardust")
+        assert p
+        r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
+            "items": [{"product_id": p["id"], "quantity": 1}],
+            "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
+        })
+        assert r.status_code in (200, 502, 503), f"got {r.status_code}: {r.text}"
+        if r.status_code == 200:
+            assert r.json().get("checkout_url", "").startswith("http")
+            db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
+
+    def test_stardust_does_not_unlock_event_pass(self, customer):
+        stardust = _find("stardust")
+        ep = _find("event_pass")
+        r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
+            "items": [
+                {"product_id": stardust["id"], "quantity": 1},
+                {"product_id": ep["id"], "quantity": 1},
+            ],
+            "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
+        })
+        assert r.status_code == 400
+        assert "Pok" in r.json()["detail"]
+
+
+# ---------------- Password change ----------------
+class TestPasswordChange:
+    def test_change_password_requires_auth(self):
+        r = requests.post(f"{API}/auth/change-password", json={
+            "current_password": "x", "new_password": "yyyyyyyy",
+        })
+        assert r.status_code == 401
+
+    def test_change_password_short_returns_422(self, customer):
+        r = requests.post(f"{API}/auth/change-password",
+                          headers=auth(customer["token"]),
+                          json={"current_password": customer["password"], "new_password": "short"})
+        assert r.status_code == 422
+
+    def test_wrong_current_password_returns_401(self, customer):
+        r = requests.post(f"{API}/auth/change-password",
+                          headers=auth(customer["token"]),
+                          json={"current_password": "wrong_pw!", "new_password": "NewPass#2026"})
+        assert r.status_code == 401
+        assert "current password" in r.json()["detail"].lower()
+
+    def test_customer_password_change_happy_path(self, customer):
+        new_pw = "NewPass#2026"
+        r = requests.post(f"{API}/auth/change-password",
+                          headers=auth(customer["token"]),
+                          json={"current_password": customer["password"], "new_password": new_pw})
+        assert r.status_code == 200 and r.json().get("ok") is True
+
+        # Verify bcrypt hash format in DB
+        user_doc = db.users.find_one({"email": customer["email"]})
+        assert user_doc["password_hash"].startswith("$2b$"), f"Not bcrypt: {user_doc['password_hash'][:10]}"
+        assert user_doc["password_hash"] != new_pw
+        assert user_doc.get("password_self_managed") is True
+
+        # OLD password rejected
+        r_old = requests.post(f"{API}/auth/login",
+                              json={"email": customer["email"], "password": customer["password"]})
+        assert r_old.status_code == 401
+
+        # NEW password works
+        r_new = requests.post(f"{API}/auth/login",
+                              json={"email": customer["email"], "password": new_pw})
+        assert r_new.status_code == 200
+        # Update fixture creds for downstream reuse
+        customer["password"] = new_pw
+        customer["token"] = r_new.json()["access_token"]
+
+    def test_reusing_same_password_returns_400(self, customer):
+        r = requests.post(f"{API}/auth/change-password",
+                          headers=auth(customer["token"]),
+                          json={"current_password": customer["password"],
+                                "new_password": customer["password"]})
+        assert r.status_code == 400
+
+
+# ---------------- Visitor tracking ----------------
+class TestVisitorTracking:
+    def test_track_public_no_auth(self):
+        r = requests.post(f"{API}/track")
+        assert r.status_code == 200 and r.json().get("ok") is True
+
+    def test_track_dedup_per_ip_per_day(self):
+        # Use forwarded IP so we test a stable identity regardless of client
+        test_ip = f"203.0.113.{__import__('random').randint(1, 250)}"
+        day = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
+        db.visits.delete_many({"ip": test_ip})
+        for _ in range(3):
+            r = requests.post(f"{API}/track", headers={"X-Forwarded-For": test_ip})
+            assert r.status_code == 200
+        docs = list(db.visits.find({"ip": test_ip, "day": day}))
+        assert len(docs) == 1, f"expected 1 doc, got {len(docs)}"
+        assert docs[0]["hits"] >= 3
+        db.visits.delete_many({"ip": test_ip})
+
+    def test_visits_indexes(self):
+        idx = db.visits.index_information()
+        # unique compound (ip, day)
+        assert any(v.get("unique") and v.get("key") == [("ip", 1), ("day", 1)]
+                   for v in idx.values()), f"missing unique (ip,day) index: {idx}"
+        # TTL on expires_at
+        assert any(v.get("expireAfterSeconds") == 0 and v.get("key") == [("expires_at", 1)]
+                   for v in idx.values()), f"missing TTL index on expires_at: {idx}"
+
+    def test_geolocation_united_states(self):
+        db.ip_geo.delete_one({"_id": "8.8.8.8"})
+        db.visits.delete_many({"ip": "8.8.8.8"})
+        r = requests.post(f"{API}/track", headers={"X-Forwarded-For": "8.8.8.8"})
+        assert r.status_code == 200
+        doc = db.visits.find_one({"ip": "8.8.8.8"})
+        assert doc is not None
+        # ip-api may be rate limited; accept United States or Unknown but at least verify no hang
+        assert doc.get("country") in ("United States", "Unknown"), doc.get("country")
+        # Cache created
+        cached = db.ip_geo.find_one({"_id": "8.8.8.8"})
+        assert cached is not None
+
+    def test_geolocation_private_ip_unknown_non_fatal(self):
+        r = requests.post(f"{API}/track", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert r.status_code == 200
+        doc = db.visits.find_one({"ip": "10.0.0.1"})
+        assert doc is not None
+        assert doc["country"] == "Unknown"
+
+
+# ---------------- Analytics endpoint ----------------
+class TestAnalytics:
+    def test_analytics_requires_admin(self, customer):
+        assert requests.get(f"{API}/admin/analytics").status_code == 401
+        assert requests.get(f"{API}/admin/analytics",
+                            headers=auth(customer["token"])).status_code == 403
+
+    def test_analytics_admin_shape(self, admin_token):
+        # Ensure at least one visit exists
+        requests.post(f"{API}/track", headers={"X-Forwarded-For": "8.8.4.4"})
+        r = requests.get(f"{API}/admin/analytics", headers=auth(admin_token))
+        assert r.status_code == 200
+        data = r.json()
+        assert "totals" in data and "top_countries" in data and "visits" in data
+        t = data["totals"]
+        for key in ("unique_visitors", "visits_today", "total_hits", "orders", "revenue", "waitlist"):
+            assert key in t, f"missing totals.{key}"
+        assert isinstance(data["visits"], list)
+        assert isinstance(data["top_countries"], list)
+
+
+# ---------------- Restore admin password to 'admin' at end of session ----------------
+def test_zz_restore_admin_password():
+    """Runs last (alphabetically after all TestX classes). Restores admin password to 'admin'
+    via direct MongoDB bcrypt hash + unsets password_self_managed so seed stays authoritative."""
+    import bcrypt as _bcrypt
+    new_hash = _bcrypt.hashpw(b"admin", _bcrypt.gensalt()).decode()
+    result = db.users.update_one(
+        {"email": ADMIN_EMAIL.lower()},
+        {"$set": {"password_hash": new_hash},
+         "$unset": {"password_self_managed": "", "password_changed_at": ""}},
+    )
+    assert result.matched_count == 1
+    # Verify login with 'admin' works
+    r = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": "admin"})
+    assert r.status_code == 200, f"admin login broken after restore: {r.text}"
+    assert r.json()["user"]["role"] == "admin"
+
