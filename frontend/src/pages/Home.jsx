@@ -10,6 +10,13 @@ const HERO = "/images/snorlax.jpg";
 const GENGAR = "/images/Mainpage.jpg";
 const PSYDUCK = "/images/psyduck.jpg";
 
+const SECTIONS = [
+  { key: "pokecoin_bundle", note: "Required for passes", noteClass: "text-zinc-600" },
+  { key: "event_pass", note: "Bundle required", noteClass: "text-[#f4d03f]" },
+  { key: "medals", note: "Standalone or bundled", noteClass: "text-[#c7a6f0]" },
+  { key: "stardust", note: "Farmed by operators", noteClass: "text-zinc-600" },
+];
+
 export default function Home() {
   const [products, setProducts] = useState([]);
   const { setOpen } = useCart();
@@ -18,7 +25,10 @@ export default function Home() {
     api.get("/products").then(({ data }) => setProducts(data)).catch(() => {});
   }, []);
 
-  const byCat = (c) => products.filter((p) => p.category === c);
+  const featured = products.filter((p) => p.is_featured);
+  const byCat = (c) => featured.filter((p) => p.category === c);
+  const featuredShundo = byCat("shundo_service");
+  const hasAnyFeatured = featured.length > 0;
 
   return (
     <div data-testid="home-page">
@@ -94,55 +104,33 @@ export default function Home() {
         </div>
       </section>
 
-      {/* STORE */}
+      {/* FEATURED STORE — only starred products, empty categories hidden */}
       <section id="store" className="mx-auto max-w-[1400px] px-5 py-20 lg:px-10 lg:py-28">
-        <div className="mb-12 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
-          <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-            {CATEGORY_LABELS.pokecoin_bundle}
-          </h2>
-          <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">Required for passes</span>
-        </div>
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-          {byCat("pokecoin_bundle").map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {SECTIONS.map(({ key, note, noteClass }) => {
+          const items = byCat(key);
+          if (items.length === 0) return null;
+          return (
+            <div key={key} data-testid={`home-section-${key}`} className="mb-24 last:mb-0">
+              <div className="mb-12 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
+                <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
+                  {CATEGORY_LABELS[key]}
+                </h2>
+                <span className={`text-[10px] uppercase tracking-[0.25em] ${noteClass}`}>{note}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
+                {items.map((p) => (
+                  <ProductCard key={p.id} product={p} featured={key === "event_pass"} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
 
-        <div className="mb-12 mt-24 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
-          <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-            {CATEGORY_LABELS.event_pass}
-          </h2>
-          <span className="text-[10px] uppercase tracking-[0.25em] text-[#f4d03f]">Bundle required</span>
-        </div>
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-          {byCat("event_pass").map((p) => (
-            <ProductCard key={p.id} product={p} featured />
-          ))}
-        </div>
-
-        <div className="mb-12 mt-24 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
-          <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-            {CATEGORY_LABELS.medals}
-          </h2>
-          <span className="text-[10px] uppercase tracking-[0.25em] text-[#c7a6f0]">Standalone or bundled</span>
-        </div>
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-          {byCat("medals").map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
-
-        <div className="mb-12 mt-24 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
-          <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-            {CATEGORY_LABELS.stardust}
-          </h2>
-          <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">Farmed by operators</span>
-        </div>
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-          {byCat("stardust").map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {!hasAnyFeatured && (
+          <p data-testid="home-no-featured" className="text-xs text-zinc-600">
+            No featured products right now — browse the full catalog for everything in stock.
+          </p>
+        )}
 
         <div className="mt-16 flex justify-center">
           <Link
@@ -182,10 +170,10 @@ export default function Home() {
             </span>
           </div>
           <div className="grid gap-8 sm:grid-cols-2 lg:col-span-6">
-            {byCat("shundo_service").map((p) => (
+            {featuredShundo.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
-            {byCat("shundo_service").length === 0 && (
+            {featuredShundo.length === 0 && (
               <img src={PSYDUCK} alt="Psyduck" className="border border-[#1f1f1f] object-cover" />
             )}
           </div>

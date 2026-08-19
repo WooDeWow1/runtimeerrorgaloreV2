@@ -23,6 +23,7 @@ from models import (  # noqa: E402
     CATEGORIES,
     ORDER_STATUSES,
     CheckoutRequest,
+    FeaturedUpdate,
     LoginRequest,
     Message,
     MessageIn,
@@ -250,6 +251,17 @@ async def update_product(product_id: str, payload: ProductIn, admin: dict = Depe
         raise HTTPException(status_code=404, detail="Product not found")
     updates = payload.model_dump()
     await db.products.update_one({"_id": oid(product_id)}, {"$set": updates})
+    doc = await db.products.find_one({"_id": oid(product_id)})
+    return Product.from_mongo(doc).model_dump(by_alias=False)
+
+
+@api.patch("/products/{product_id}/featured")
+async def toggle_featured(product_id: str, payload: FeaturedUpdate, admin: dict = Depends(get_admin_user)):
+    result = await db.products.update_one(
+        {"_id": oid(product_id)}, {"$set": {"is_featured": payload.is_featured}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
     doc = await db.products.find_one({"_id": oid(product_id)})
     return Product.from_mongo(doc).model_dump(by_alias=False)
 
@@ -691,42 +703,42 @@ app.add_middleware(
 SEED_PRODUCTS = [
     {"name": "550 Pokécoins", "description": "Instant Pokécoin top-up delivered to your account within the hour.",
      "category": "pokecoin_bundle", "price": 4.99, "coins": 550, "badge": "STARTER",
-     "image_url": "/images/coins-stack.jpg"},
+     "is_featured": True, "image_url": "/images/coins-stack.jpg"},
     {"name": "1,200 Pokécoins", "description": "Mid-tier stack. Best value per coin for regular raiders.",
      "category": "pokecoin_bundle", "price": 8.99, "coins": 1200, "badge": "POPULAR",
-     "image_url": "/images/coins-stack.jpg"},
+     "is_featured": True, "image_url": "/images/coins-stack.jpg"},
     {"name": "5,200 Pokécoins", "description": "Whale stack. Storage, incubators, remote passes — all covered.",
      "category": "pokecoin_bundle", "price": 29.99, "coins": 5200, "badge": "MAX",
-     "image_url": "/images/snorlax.jpg"},
+     "is_featured": True, "image_url": "/images/snorlax.jpg"},
     {"name": "GO Fest Global Ticket", "description": "Full weekend access pass. Requires a Pokécoin bundle in cart.",
      "category": "event_pass", "price": 14.99, "badge": "EVENT",
-     "image_url": "/images/event-pass.jpg"},
+     "is_featured": True, "image_url": "/images/event-pass.jpg"},
     {"name": "Ghost Hour Raid Pass", "description": "Gengar Mega raid weekend timed research pass.",
      "category": "event_pass", "price": 6.99, "badge": "LIMITED",
-     "image_url": "/images/gengar.jpg"},
+     "is_featured": True, "image_url": "/images/gengar.jpg"},
     {"name": "Shundo Hunt — Single Target", "description": "Location-simulated shundo hunting via iTools, PGTools, RegiBot & Shungo. Launching soon.",
      "category": "shundo_service", "price": 49.99, "badge": "COMING SOON", "coming_soon": True,
      "image_url": "/images/psyduck.jpg"},
     {"name": "Platinum Medal — Single Badge",
      "description": "Operator grind service to push any single medal to Platinum. Standalone or bundled with coins.",
      "category": "medals", "price": 24.99, "msrp": 49.99, "badge": "SERVICE",
-     "image_url": "/images/platinum-medal.jpg"},
+     "is_featured": True, "image_url": "/images/platinum-medal.jpg"},
     {"name": "Platinum Medal — Full Set Grind",
      "description": "Full sweep of the medal board to Platinum, handled by our operator fleet across multiple sessions.",
      "category": "medals", "price": 99.99, "msrp": 199.99, "badge": "BEST VALUE",
-     "image_url": "/images/platinum-medal-set.jpg"},
+     "is_featured": True, "image_url": "/images/platinum-medal-set.jpg"},
     {"name": "1M Stardust Farming",
      "description": "Operator-farmed 1,000,000 Stardust delivered to your account. Ideal for a few second moves and trades.",
      "category": "stardust", "price": 19.99, "msrp": 39.99, "badge": "STARTER",
-     "image_url": "/images/stardust.jpg"},
+     "is_featured": True, "image_url": "/images/stardust.jpg"},
     {"name": "5M Stardust Farming",
      "description": "5,000,000 Stardust farmed across dedicated sessions. Enough to power up a full raid squad.",
      "category": "stardust", "price": 79.99, "msrp": 159.99, "badge": "POPULAR",
-     "image_url": "/images/stardust.jpg"},
+     "is_featured": True, "image_url": "/images/stardust.jpg"},
     {"name": "10M Stardust Farming",
      "description": "10,000,000 Stardust bulk farm. Our biggest dust drop — second moves, trades and max PvP builds covered.",
      "category": "stardust", "price": 139.99, "msrp": 299.99, "badge": "MAX",
-     "image_url": "/images/stardust.jpg"},
+     "is_featured": True, "image_url": "/images/stardust.jpg"},
     {"name": "Shundo Hunt — Community Day Background Target",
      "description": "Operators run your account in the background all Community Day, chasing the featured shiny-hundo while you go about your day. Launching soon.",
      "category": "shundo_service", "price": 79.99, "badge": "COMING SOON", "coming_soon": True,

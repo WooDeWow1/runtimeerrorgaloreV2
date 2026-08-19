@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 7 verified the Stardust visibility fix and the new is_featured feature end-to-end. Backend pytest: 66/66 passed. Added TestStardustVisibility (active/coming_soon + lowercase snake_case category invariant), TestFeaturedField (is_featured present on every product, defaults false on POST, honors true on POST, PUT round-trips both values) and TestFeaturedToggle (PATCH /api/products/{id}/featured — 401 unauth, 403 customer, 404 for valid-but-missing id, ON/OFF persistence via GET). UI verified on desktop 1920x1080 and mobile 390x844: home shows 4 category sections grouped correctly (pokecoin_bundle=3, event_pass=2, medals=1, stardust=3), /products Stardust tab shows all 3 stardust cards regardless of feature state, unstarring all Stardust via PATCH removes home-section-stardust entirely (no empty heading, no leftover whitespace) while the catalog still lists them, and the admin star toggle (aria-pressed) flips optimistically and persists across reload. Long Stardust descriptions are visibly clamped to ~5 lines on cards. Final DB state restored: every non-shundo product is featured=True, coming-soon Shundo items remain featured=False, and admin/admin login is re-verified by the test_zz_restore_admin_password teardown.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Data drift observed at start of session: the three Stardust products were in DB with active=False even though iteration-6 claims they were re-activated. Ran /app/scripts/migrate_featured_products.py to re-activate + set is_featured=True. Root cause is likely someone toggled active=False via admin UI between iterations, or the migration wasn't executed in this preview DB. Consider making the migration idempotent + running it on backend startup (e.g. in the seed block after count check) so a manual step isn't required.",
+    "Minor pre-existing test drift fixed: TestStardustCategory.test_seeded_stardust_products_present previously hard-coded prices (19.99/79.99/139.99); the user has since raised prices to 59.99/109.99/199.99. Relaxed the assertion to len>=3 and msrp>price invariant per the user's rule 'do not assert on exact prices/counts for live catalog'."
+  ],
+  "critical_code_review_comments": [
+    "models.py — ProductIn/Product both carry is_featured (default False) and FeaturedUpdate is a dedicated request model. Correct.",
+    "server.py PATCH /products/{id}/featured — admin-gated (Depends(get_admin_user)), matched_count==0 returns 404, returns Product.from_mongo(doc).model_dump(by_alias=False) after update so _id never leaks. Good.",
+    "server.py list_products — public call returns active-only; admin can pass include_inactive=true. This is what makes the featured toggle behaviour work independently of active state.",
+    "server.py PUT /products/{id} passes payload.model_dump() so is_featured is always overwritten by the client body (never silently dropped). Verified via test_put_preserves_is_featured.",
+    "Home.jsx correctly filters by is_featured client-side then groups by category and returns null for empty categories — no empty <div>/heading rendered. home-no-featured fallback shown only when the WHOLE featured list is empty. home-all-products-btn is always present.",
+    "Admin.jsx toggleFeatured() does optimistic setProducts + rollback on error. data-testid=toggle-featured-{id}, aria-pressed matches state, star icon fill toggles, ' · featured' subtitle appears. Good.",
+    "ProductCard.jsx uses line-clamp-5 (visually confirmed on the very long Stardust description — grid stays uniform).",
+    "One minor observation (non-blocking): PATCH /products/{id}/featured does not validate ObjectId format explicitly — oid() will raise if malformed but the try/except in that helper is worth double-checking so bad IDs return 400 instead of 500. Non-existent-but-valid-ObjectId already returns 404 correctly.",
+    "Duplicate 'Shundo Hunt — Community Day Background Target' rows exist in the DB (one active=False, one active=True). Not caused by this iteration — legacy data. Consider adding a unique-name index or letting admin dedupe from the UI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py — added TestStardustVisibility (2 tests), TestFeaturedField (4 tests), TestFeaturedToggle (4 tests); relaxed TestStardustCategory.test_seeded_stardust_products_present to invariant assertions only"
+  ],
+  "success_rate": {
+    "backend": "100% (66/66)",
+    "frontend": "100% — home groupings, category hiding, /products catalog independence, admin star toggle with persistence-after-reload, long-description clamp, and mobile 390x844 layout all verified"
+  },
+  "test_credentials": "Admin officialwifi@icloud.com / admin (restored via test_zz_restore_admin_password); ephemeral customers per session via /api/auth/register.",
+  "seed_data_creation": "Test products TEST_FeatDefault / TEST_FeatTrue / TEST_FeatPut / TEST_ToggleFeat / TEST_StardustProd / TEST_MedalProd / TEST_Prod are created and deleted within each test. All live products left with is_featured=True except the coming-soon Shundo services (kept featured=False as instructed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: `pytest backend/tests/backend_test.py -v -n 0` (66 tests, all pass). Do NOT remove test_zz_restore_admin_password — it resets admin/admin. If Stardust products ever go back to active=False in the DB, run `python3 /app/scripts/migrate_featured_products.py` to re-activate them (safe/idempotent-ish for the stardust rows). The user actively edits prices/names, so keep catalogue assertions on invariants (msrp>price, category snake_case, count thresholds) not exact values. All is_featured behaviour is covered by TestFeaturedField + TestFeaturedToggle + the manual Playwright walkthrough documented in this iteration.",
+  "rca of the issue": "PRIMARY BUG (Stardust invisible) — root cause was products.active=False + coming_soon=True on the 3 Stardust docs so /api/products (active-only filter) excluded them. The migration script /app/scripts/migrate_featured_products.py fixes it by $set active:True, coming_soon:False on category=='stardust'. In this preview DB the products were still active=False at the start of this session (drift since iteration-6); running the migration restored expected state and all UI tests then passed. Recommendation: invoke this migration once at backend startup (guarded by a version key) so future preview forks don't drift."
+}

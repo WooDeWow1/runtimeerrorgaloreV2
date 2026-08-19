@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Eye, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { BarChart3, Eye, KeyRound, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, CATEGORY_LABELS, money, STATUS_LABELS } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -119,6 +119,18 @@ export default function Admin() {
       toast.success("Product removed");
       loadProducts();
     } catch (e) {
+      toast.error(apiError(e));
+    }
+  };
+
+  const toggleFeatured = async (product) => {
+    const next = !product.is_featured;
+    setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_featured: next } : p)));
+    try {
+      await api.patch(`/products/${product.id}/featured`, { is_featured: next });
+      toast.success(next ? `${product.name} featured on the home page` : `${product.name} unfeatured`);
+    } catch (e) {
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_featured: !next } : p)));
       toast.error(apiError(e));
     }
   };
@@ -300,8 +312,22 @@ export default function Admin() {
                   <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                     {CATEGORY_LABELS[p.category]} · {money(p.price)} {p.active ? "" : "· inactive"}
                     {p.coming_soon ? " · soon" : ""}
+                    {p.is_featured ? " · featured" : ""}
                   </p>
                 </div>
+                <button
+                  data-testid={`toggle-featured-${p.id}`}
+                  aria-pressed={p.is_featured}
+                  title={p.is_featured ? "Remove from home page" : "Feature on home page"}
+                  onClick={() => toggleFeatured(p)}
+                  className={`border p-2 transition-colors ${
+                    p.is_featured
+                      ? "border-[#f4d03f] text-[#f4d03f]"
+                      : "border-zinc-800 text-zinc-500 hover:border-[#f4d03f] hover:text-[#f4d03f]"
+                  }`}
+                >
+                  <Star className="h-3.5 w-3.5" fill={p.is_featured ? "currentColor" : "none"} />
+                </button>
                 <button data-testid={`edit-product-${p.id}`} onClick={() => editProduct(p)}
                         className="border border-zinc-800 p-2 text-zinc-400 hover:border-[#00ffcc] hover:text-[#00ffcc]">
                   <Pencil className="h-3.5 w-3.5" />

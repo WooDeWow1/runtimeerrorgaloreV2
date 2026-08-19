@@ -513,16 +513,10 @@ class TestStardustCategory:
     def test_seeded_stardust_products_present(self):
         products = _products()
         stardust = [p for p in products if p["category"] == "stardust"]
-        assert len(stardust) >= 3, f"Expected 3 stardust products, got {len(stardust)}"
-        by_name = {p["name"]: p for p in stardust}
-        assert by_name["1M Stardust Farming"]["price"] == 19.99
-        assert by_name["1M Stardust Farming"]["msrp"] == 39.99
-        assert by_name["5M Stardust Farming"]["price"] == 79.99
-        assert by_name["5M Stardust Farming"]["msrp"] == 159.99
-        assert by_name["10M Stardust Farming"]["price"] == 139.99
-        assert by_name["10M Stardust Farming"]["msrp"] == 299.99
+        assert len(stardust) >= 3, f"Expected >=3 stardust products, got {len(stardust)}"
+        # User actively edits prices; only assert MSRP > price invariant.
         for p in stardust:
-            assert p["msrp"] > p["price"]
+            assert p.get("msrp") is None or p["msrp"] > p["price"]
 
     def test_admin_create_stardust_product(self, admin_token):
         payload = {"name": "TEST_StardustProd", "description": "d", "category": "stardust",
@@ -696,6 +690,126 @@ class TestAnalytics:
             assert key in t, f"missing totals.{key}"
         assert isinstance(data["visits"], list)
         assert isinstance(data["top_countries"], list)
+
+
+# ---------------- Stardust visibility (iteration 7) ----------------
+class TestStardustVisibility:
+    def test_stardust_products_active_and_not_coming_soon(self):
+        products = _products()
+        stardust = [p for p in products if p["category"] == "stardust"]
+        assert len(stardust) >= 3, f"Expected >=3 stardust, got {len(stardust)}"
+        for p in stardust:
+            assert p.get("active", True) is True, f"{p['name']} not active"
+            assert p.get("coming_soon", False) is False, f"{p['name']} coming_soon"
+
+    def test_all_category_keys_are_lowercase_snake_case(self):
+        allowed = {"pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"}
+        for p in _products():
+            assert p["category"] in allowed, f"Invalid category on {p['name']}: {p['category']}"
+            assert p["category"] == p["category"].lower()
+
+
+# ---------------- is_featured field (iteration 7) ----------------
+class TestFeaturedField:
+    def test_is_featured_present_on_every_product(self):
+        for p in _products():
+            assert "is_featured" in p, f"Missing is_featured on {p['name']}"
+            assert isinstance(p["is_featured"], bool), f"is_featured not bool: {p['is_featured']}"
+
+    def test_create_defaults_is_featured_false(self, admin_token):
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json={
+            "name": "TEST_FeatDefault", "category": "medals", "price": 1.0, "msrp": 2.0,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["is_featured"] is False
+        # Verify persisted
+        for p in _products():
+            if p["id"] == data["id"]:
+                assert p["is_featured"] is False
+                break
+        requests.delete(f"{API}/products/{data['id']}", headers=auth(admin_token))
+
+    def test_create_with_is_featured_true_persists(self, admin_token):
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json={
+            "name": "TEST_FeatTrue", "category": "medals", "price": 1.0, "msrp": 2.0,
+            "is_featured": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["is_featured"] is True
+        requests.delete(f"{API}/products/{data['id']}", headers=auth(admin_token))
+
+    def test_put_preserves_is_featured(self, admin_token):
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json={
+            "name": "TEST_FeatPut", "category": "medals", "price": 1.0, "msrp": 2.0,
+            "is_featured": True,
+        })
+        pid = r.json()["id"]
+        # PUT with is_featured explicitly true
+        r2 = requests.put(f"{API}/products/{pid}", headers=auth(admin_token), json={
+            "name": "TEST_FeatPut2", "category": "medals", "price": 1.5, "msrp": 3.0,
+            "is_featured": True,
+        })
+        assert r2.status_code == 200 and r2.json()["is_featured"] is True
+        # PUT to false
+        r3 = requests.put(f"{API}/products/{pid}", headers=auth(admin_token), json={
+            "name": "TEST_FeatPut2", "category": "medals", "price": 1.5, "msrp": 3.0,
+            "is_featured": False,
+        })
+        assert r3.json()["is_featured"] is False
+        requests.delete(f"{API}/products/{pid}", headers=auth(admin_token))
+
+
+# ---------------- PATCH /api/products/{id}/featured (iteration 7) ----------------
+class TestFeaturedToggle:
+    def test_requires_auth(self):
+        products = _products()
+        pid = products[0]["id"]
+        r = requests.patch(f"{API}/products/{pid}/featured", json={"is_featured": True})
+        assert r.status_code == 401
+
+    def test_forbidden_for_customer(self, customer):
+        pid = _products()[0]["id"]
+        r = requests.patch(f"{API}/products/{pid}/featured",
+                           headers=auth(customer["token"]),
+                           json={"is_featured": True})
+        assert r.status_code == 403
+
+    def test_404_for_nonexistent(self, admin_token):
+        # Valid-looking ObjectId that doesn't exist
+        r = requests.patch(f"{API}/products/000000000000000000000000/featured",
+                           headers=auth(admin_token),
+                           json={"is_featured": True})
+        assert r.status_code == 404
+
+    def test_toggle_persists(self, admin_token):
+        # Create isolated test product
+        r = requests.post(f"{API}/products", headers=auth(admin_token), json={
+            "name": "TEST_ToggleFeat", "category": "medals", "price": 1.0, "msrp": 2.0,
+            "is_featured": False,
+        })
+        pid = r.json()["id"]
+
+        # Toggle ON
+        r_on = requests.patch(f"{API}/products/{pid}/featured",
+                              headers=auth(admin_token),
+                              json={"is_featured": True})
+        assert r_on.status_code == 200
+        assert r_on.json()["is_featured"] is True
+        # Persistence via GET
+        got = next(p for p in _products() if p["id"] == pid)
+        assert got["is_featured"] is True
+
+        # Toggle OFF
+        r_off = requests.patch(f"{API}/products/{pid}/featured",
+                               headers=auth(admin_token),
+                               json={"is_featured": False})
+        assert r_off.status_code == 200 and r_off.json()["is_featured"] is False
+        got2 = next(p for p in _products() if p["id"] == pid)
+        assert got2["is_featured"] is False
+
+        requests.delete(f"{API}/products/{pid}", headers=auth(admin_token))
 
 
 # ---------------- Restore admin password to 'admin' at end of session ----------------

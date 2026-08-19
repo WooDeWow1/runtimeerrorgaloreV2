@@ -62,6 +62,7 @@ class ProductIn(BaseModel):
     badge: str = ""
     active: bool = True
     coming_soon: bool = False
+    is_featured: bool = False
 
 
 class Product(BaseDocument):
@@ -75,6 +76,7 @@ class Product(BaseDocument):
     badge: str = ""
     active: bool = True
     coming_soon: bool = False
+    is_featured: bool = False
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -116,6 +118,10 @@ class Order(BaseDocument):
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+class FeaturedUpdate(BaseModel):
+    is_featured: bool
 
 
 class MessageIn(BaseModel):
