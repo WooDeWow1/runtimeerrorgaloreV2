@@ -17,12 +17,16 @@ from bson import ObjectId  # noqa: E402
 from bson.errors import InvalidId  # noqa: E402
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
+from pymongo.errors import DuplicateKeyError  # noqa: E402
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
 
 from models import (  # noqa: E402
     CATEGORIES,
     ORDER_STATUSES,
     CheckoutRequest,
+    Coupon,
+    CouponIn,
+    CouponValidateRequest,
     FeaturedUpdate,
     LoginRequest,
     Message,
@@ -274,6 +278,123 @@ async def delete_product(product_id: str, admin: dict = Depends(get_admin_user))
     return {"ok": True}
 
 
+# ---------------- Coupons ----------------
+async def resolve_items(entries) -> List[OrderItem]:
+    items: List[OrderItem] = []
+    for entry in entries:
+        doc = await db.products.find_one({"_id": oid(entry.product_id), "active": True})
+        if not doc:
+            raise HTTPException(status_code=400, detail="A product in your cart is unavailable")
+        if doc.get("coming_soon"):
+            raise HTTPException(status_code=400, detail=f"{doc['name']} is not available yet")
+        items.append(OrderItem(
+            product_id=str(doc["_id"]), name=doc["name"], category=doc["category"],
+            price=float(doc["price"]), quantity=entry.quantity,
+        ))
+    return items
+
+
+async def apply_coupon(code: Optional[str], items: List[OrderItem]) -> dict:
+    """Returns pricing breakdown. Raises 400 with a human message if the code cannot be used."""
+    subtotal = round(sum(i.price * i.quantity for i in items), 2)
+    result = {
+        "subtotal": subtotal, "discount": 0.0, "total": subtotal,
+        "coupon_code": None, "percent_off": None,
+        "eligible_subtotal": subtotal, "excluded_items": [],
+    }
+    if not code:
+        return result
+
+    coupon = await db.coupons.find_one({"code": code.strip().upper()})
+    if not coupon or not coupon.get("active", True):
+        raise HTTPException(status_code=400, detail="That coupon code is not valid.")
+    expires = coupon.get("expires_at")
+    if expires and expires.replace(tzinfo=timezone.utc) < utc_now():
+        raise HTTPException(status_code=400, detail="That coupon has expired.")
+    if coupon.get("max_uses") and coupon.get("used_count", 0) >= coupon["max_uses"]:
+        raise HTTPException(status_code=400, detail="That coupon has reached its usage limit.")
+    if coupon.get("min_subtotal") and subtotal < coupon["min_subtotal"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Spend at least ${coupon['min_subtotal']:.2f} to use this coupon.",
+        )
+
+    excluded_ids = set(coupon.get("excluded_product_ids") or [])
+    excluded_cats = set(coupon.get("excluded_categories") or [])
+    eligible, excluded_names = [], []
+    for i in items:
+        if i.product_id in excluded_ids or i.category in excluded_cats:
+            excluded_names.append(i.name)
+        else:
+            eligible.append(i)
+    if not eligible:
+        raise HTTPException(
+            status_code=400, detail="This coupon does not apply to any item in your cart."
+        )
+
+    eligible_subtotal = round(sum(i.price * i.quantity for i in eligible), 2)
+    discount = round(eligible_subtotal * coupon["percent_off"] / 100, 2)
+    result.update({
+        "discount": discount,
+        "total": round(subtotal - discount, 2),
+        "coupon_code": coupon["code"],
+        "percent_off": coupon["percent_off"],
+        "eligible_subtotal": eligible_subtotal,
+        "excluded_items": excluded_names,
+    })
+    return result
+
+
+@api.post("/coupons/validate")
+async def validate_coupon(payload: CouponValidateRequest):
+    items = await resolve_items(payload.items)
+    return await apply_coupon(payload.code, items)
+
+
+@api.get("/admin/coupons")
+async def list_coupons(admin: dict = Depends(get_admin_user)):
+    docs = await db.coupons.find().sort("created_at", -1).to_list(200)
+    return [Coupon.from_mongo(d).model_dump(by_alias=False) for d in docs]
+
+
+@api.post("/admin/coupons")
+async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)):
+    for cat in payload.excluded_categories:
+        if cat not in CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
+    coupon = Coupon(**{**payload.model_dump(), "code": payload.code.strip().upper()})
+    try:
+        result = await db.coupons.insert_one(coupon.to_mongo())
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="That coupon code already exists")
+    doc = await db.coupons.find_one({"_id": result.inserted_id})
+    return Coupon.from_mongo(doc).model_dump(by_alias=False)
+
+
+@api.put("/admin/coupons/{coupon_id}")
+async def update_coupon(coupon_id: str, payload: CouponIn, admin: dict = Depends(get_admin_user)):
+    for cat in payload.excluded_categories:
+        if cat not in CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
+    updates = {**payload.model_dump(), "code": payload.code.strip().upper()}
+    try:
+        result = await db.coupons.update_one({"_id": oid(coupon_id)}, {"$set": updates})
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="That coupon code already exists")
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Coupon not found")
+    doc = await db.coupons.find_one({"_id": oid(coupon_id)})
+    return Coupon.from_mongo(doc).model_dump(by_alias=False)
+
+
+@api.delete("/admin/coupons/{coupon_id}")
+async def delete_coupon(coupon_id: str, admin: dict = Depends(get_admin_user)):
+    result = await db.coupons.delete_one({"_id": oid(coupon_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Coupon not found")
+    return {"ok": True}
+
+
 # ---------------- Orders ----------------
 def order_response(doc: dict, include_credentials: bool = False) -> dict:
     order = Order.from_mongo(doc)
@@ -298,17 +419,7 @@ async def notify(user_id: str, order_id: str, title: str, body: str):
 async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_optional_user)):
     if not payload.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
-    items: List[OrderItem] = []
-    for entry in payload.items:
-        doc = await db.products.find_one({"_id": oid(entry.product_id), "active": True})
-        if not doc:
-            raise HTTPException(status_code=400, detail="A product in your cart is unavailable")
-        if doc.get("coming_soon"):
-            raise HTTPException(status_code=400, detail=f"{doc['name']} is not available yet")
-        items.append(OrderItem(
-            product_id=str(doc["_id"]), name=doc["name"], category=doc["category"],
-            price=float(doc["price"]), quantity=entry.quantity,
-        ))
+    items = await resolve_items(payload.items)
 
     has_pass = any(i.category == "event_pass" for i in items)
     has_coins = any(i.category == "pokecoin_bundle" for i in items)
@@ -318,7 +429,8 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
             detail="An Event Pass requires at least one Pokécoin Bundle in your cart.",
         )
 
-    total = round(sum(i.price * i.quantity for i in items), 2)
+    pricing = await apply_coupon(payload.coupon_code, items)
+    total = pricing["total"]
     user_id = str(user["_id"]) if user else ""
     email = (user["email"] if user else (payload.email or "")).lower()
     if not email:
@@ -328,6 +440,9 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     session_doc = {
         "items": [i.model_dump() for i in items],
         "total": total,
+        "subtotal": pricing["subtotal"],
+        "discount": pricing["discount"],
+        "coupon_code": pricing["coupon_code"],
         "user_id": user_id,
         "email": email,
         "origin_url": payload.origin_url.rstrip("/"),
@@ -340,9 +455,25 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     result = await db.checkout_sessions.insert_one(session_doc)
     session_id = str(result.inserted_id)
 
+    # SellAuth is charged the discounted amounts; the order keeps original prices + discount metadata.
+    charge_items = [i.model_dump() for i in items]
+    if pricing["discount"] > 0:
+        factor = 1 - pricing["percent_off"] / 100
+        excluded = set(pricing["excluded_items"])
+        eligible_idx = [n for n, e in enumerate(charge_items) if e["name"] not in excluded]
+        for n in eligible_idx:
+            charge_items[n]["price"] = round(charge_items[n]["price"] * factor, 2)
+        # Absorb per-line rounding drift into the last eligible line so the charge matches `total`.
+        charged = round(sum(e["price"] * e["quantity"] for e in charge_items), 2)
+        drift = round(total - charged, 2)
+        if drift and eligible_idx:
+            last = charge_items[eligible_idx[-1]]
+            adjusted = round(last["price"] + drift / last["quantity"], 2)
+            last["price"] = max(adjusted, 0.01)
+
     try:
         checkout_data = await sellauth.create_checkout(
-            items=[i.model_dump() for i in items], email=email, session_id=session_id
+            items=charge_items, email=email, session_id=session_id
         )
     except sellauth.SellAuthPlanError as exc:
         await db.checkout_sessions.delete_one({"_id": result.inserted_id})
@@ -371,6 +502,9 @@ async def create_order_from_session(session: dict) -> Optional[str]:
         user_email=session["email"],
         items=[OrderItem(**i) for i in session["items"]],
         total=session["total"],
+        subtotal=session.get("subtotal", session["total"]),
+        discount=session.get("discount", 0.0),
+        coupon_code=session.get("coupon_code"),
         status="pending",
         payment_status="paid",
         session_id=str(session["_id"]),
@@ -379,6 +513,8 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     )
     result = await db.orders.insert_one(order.to_mongo())
     order_id = str(result.inserted_id)
+    if session.get("coupon_code"):
+        await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
     await db.checkout_sessions.update_one(
         {"_id": session["_id"]}, {"$set": {"status": "paid", "order_id": order_id}}
     )
@@ -758,6 +894,7 @@ async def startup():
     await db.visits.create_index([("ip", 1), ("day", 1)], unique=True)
     await db.checkout_sessions.create_index("invoice_id")
     await db.webhook_events.create_index("event_key", unique=True)
+    await db.coupons.create_index("code", unique=True)
 
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]

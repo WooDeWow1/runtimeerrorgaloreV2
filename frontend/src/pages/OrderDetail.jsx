@@ -75,6 +75,11 @@ export default function OrderDetail() {
             <span className="text-zinc-500">Total</span>
             <span data-testid="order-total" className="font-display text-base text-[#00ffcc]">{money(order.total)}</span>
           </div>
+          {order.discount > 0 && (
+            <p data-testid="order-discount" className="px-5 pb-4 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc]">
+              Coupon {order.coupon_code} · -{money(order.discount)} off {money(order.subtotal)}
+            </p>
+          )}
         </div>
 
         <p className="mt-6 text-[10px] uppercase tracking-[0.2em] text-zinc-600">

@@ -19,6 +19,43 @@ export default function Checkout() {
   const [ptcPassword, setPtcPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [coupon, setCoupon] = useState("");
+  const [applied, setApplied] = useState(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponError, setCouponError] = useState("");
+
+  const cartPayload = items.map((i) => ({ product_id: i.id, quantity: i.quantity }));
+  const payable = applied ? applied.total : total;
+
+  const applyCoupon = async () => {
+    if (!coupon.trim()) return;
+    setCouponBusy(true);
+    setCouponError("");
+    try {
+      const { data } = await api.post("/coupons/validate", {
+        code: coupon.trim(),
+        items: cartPayload,
+      });
+      setApplied(data);
+      toast.success(`${data.coupon_code} applied — ${data.percent_off}% off`, {
+        description:
+          data.excluded_items.length > 0
+            ? `Not valid on: ${data.excluded_items.join(", ")}`
+            : undefined,
+      });
+    } catch (err) {
+      setApplied(null);
+      setCouponError(apiError(err));
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setApplied(null);
+    setCoupon("");
+    setCouponError("");
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -26,10 +63,11 @@ export default function Checkout() {
     setBusy(true);
     try {
       const { data } = await api.post("/orders/checkout", {
-        items: items.map((i) => ({ product_id: i.id, quantity: i.quantity })),
+        items: cartPayload,
         ptc_username: ptcUsername,
         ptc_password: ptcPassword,
         origin_url: window.location.origin,
+        ...(applied ? { coupon_code: applied.coupon_code } : {}),
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
@@ -127,7 +165,7 @@ export default function Checkout() {
             disabled={busy || invalid}
             className="mt-8 w-full border border-[#00ffcc] py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
           >
-            {busy ? "Opening secure payment…" : `Pay ${money(total)}`}
+            {busy ? "Opening secure payment…" : `Pay ${money(payable)}`}
           </button>
         </form>
       </div>
@@ -146,8 +184,78 @@ export default function Checkout() {
             ))}
           </div>
           <div className="mt-6 flex justify-between border-t border-zinc-800 pt-5 text-xs uppercase tracking-[0.2em] text-zinc-400">
+            <span>Subtotal</span>
+            <span data-testid="checkout-subtotal" className="text-white">{money(total)}</span>
+          </div>
+
+          <div className="mt-5 border-t border-zinc-800 pt-5">
+            <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500">
+              Discount code
+            </label>
+            {applied ? (
+              <div
+                data-testid="applied-coupon"
+                className="flex items-center justify-between gap-3 border border-[#00ffcc]/50 bg-[#00ffcc]/[0.06] p-3"
+              >
+                <span className="text-xs font-bold text-[#00ffcc]">
+                  {applied.coupon_code} · {applied.percent_off}% off
+                </span>
+                <button
+                  type="button"
+                  data-testid="remove-coupon-btn"
+                  onClick={removeCoupon}
+                  className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-[#ff3b30]"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  data-testid="coupon-input"
+                  value={coupon}
+                  onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                  placeholder="ENTER CODE"
+                  className="flex-1 bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
+                />
+                <button
+                  type="button"
+                  data-testid="apply-coupon-btn"
+                  onClick={applyCoupon}
+                  disabled={couponBusy}
+                  className="border border-[#00ffcc] px-4 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:opacity-50"
+                >
+                  {couponBusy ? "…" : "Apply"}
+                </button>
+              </div>
+            )}
+            {couponError && (
+              <p data-testid="coupon-error" className="mt-2 text-[10px] leading-relaxed text-[#ff3b30]">
+                {couponError}
+              </p>
+            )}
+            {applied?.excluded_items?.length > 0 && (
+              <p data-testid="coupon-excluded-note" className="mt-2 text-[10px] leading-relaxed text-[#f4d03f]">
+                Not valid on: {applied.excluded_items.join(", ")}
+              </p>
+            )}
+          </div>
+
+          {applied && (
+            <div
+              data-testid="checkout-discount-row"
+              className="mt-5 flex justify-between text-xs uppercase tracking-[0.2em] text-[#00ffcc]"
+            >
+              <span>Discount</span>
+              <span>-{money(applied.discount)}</span>
+            </div>
+          )}
+
+          <div className="mt-5 flex justify-between border-t border-zinc-800 pt-5 text-xs uppercase tracking-[0.2em] text-zinc-400">
             <span>Total</span>
-            <span data-testid="checkout-total" className="font-display text-lg text-[#00ffcc]">{money(total)}</span>
+            <span data-testid="checkout-total" className="font-display text-lg text-[#00ffcc]">
+              {money(payable)}
+            </span>
           </div>
           <p className="mt-4 text-[10px] leading-relaxed text-zinc-600">
             Payment is handled by SellAuth (crypto & Cash App supported). Your order is created the moment

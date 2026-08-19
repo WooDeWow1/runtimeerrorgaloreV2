@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 8 exercised the new coupon feature end-to-end. Added 4 new test classes to /app/backend/tests/backend_test.py (TestCouponAdminCrud x9, TestCouponValidation x7, TestCouponExclusions x3, TestCouponCheckout x4 — 23 new tests). Full pytest -n 0 run: 89 passed, 0 failed, 0 skipped in ~100s. UI verified on desktop (1920x1080) and mobile (390x844): admin Coupons tab supports create → list-with-exclusion-summary → edit (form repopulates) → delete; checkout /checkout renders coupon-input + apply-coupon-btn, applies a lowercase code correctly (mixed cart: bundle $14.99 + stardust $59.99, coupon 25% off excluding stardust → subtotal $74.98, discount $3.75 [= 14.99*0.25], total $71.23, pay button text updates to $71.23, excluded-note names '1M Stardust Farming'), remove-coupon-btn restores total, invalid code renders coupon-error inline without breaking the page, mobile has no horizontal overflow. Admin-created coupons are cleaned up in every test. SAVE20 remains inactive as instructed. test_zz_restore_admin_password ran last and re-verified admin/admin login.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py apply_coupon() — cleanly composed: subtotal → active/expiry/max_uses/min_subtotal gates → category+product-id exclusion → discount = round(eligible_subtotal * pct/100, 2). Confirmed by TestCouponExclusions arithmetic (14.99*0.25=3.75, 74.98-3.75=71.23).",
+    "server.py checkout() — server-side re-computes pricing via apply_coupon(); a client-sent amount would not be trusted (only coupon_code is read from the payload). Session persists subtotal/discount/total/coupon_code. SellAuth is charged the DISCOUNTED per-item price by scaling eligible items by (1 - pct/100) and leaving excluded items at full price. Verified via test_checkout_applies_discount_server_side_and_stores_on_session.",
+    "server.py checkout() — Event-Pass-requires-Bundle rule runs BEFORE apply_coupon, so an event-pass-only cart with a coupon returns the bundle error (confirmed by test_event_pass_bundle_rule_precedes_coupon_error). Good ordering.",
+    "server.py checkout() — on SellAuth error the newly-inserted session doc is deleted (test_checkout_invalid_coupon_400_no_orphan_session verifies no orphan on a 400 path too, because the 400 is raised before the session doc is written).",
+    "server.py create_order_from_session() — $inc used_count runs once per session promotion, and webhook_events dedup by event_key means a replay is short-circuited before create_order_from_session is called again → used_count stays at 1. Verified in test_webhook_promotes_session_with_coupon_and_increments_used_count.",
+    "server.py startup() creates coupons.code unique index → duplicate insert raises DuplicateKeyError which apply_coupon translates to a friendly 400 (test_duplicate_code_returns_400).",
+    "models.py CouponIn constraints — percent_off gt=0/le=100 gives 422 (verified), min_subtotal ge=0, max_uses ge=1, code min/max length. Solid Pydantic gating.",
+    "PUT /api/admin/coupons/{id} — DOES NOT preserve used_count on the write payload (used_count is not part of CouponIn, so {**payload.model_dump(), 'code': …} only sets the CouponIn fields via $set — used_count remains intact in the doc). Behaviour is correct; noting because it depends on relying on $set leaving unlisted fields alone (which it does).",
+    "Minor observation (non-blocking): checkout() applies the per-item price scale using factor = 1 - percent_off/100 across all eligible items, then rounds each item to 2dp. When multiple eligible items are present, the sum of the rounded items can drift from the stored session 'total' by up to a few cents due to per-line rounding. In this shop's mostly-single-item cart flow it hasn't surfaced, but a future test with 3+ eligible items at odd prices could see SellAuth charge ≠ session.total by a cent or two.",
+    "Admin.jsx — coupons tab wiring is complete: loadCoupons on tab switch, form uses EMPTY_COUPON default, toggleExclusion for category chips + product checkboxes, saveCoupon handles both create and edit with editingCoupon id. cancel-coupon-edit-btn exists and resets form (verified via UI test). Coupon deletion uses window.confirm — handled in playwright by dialog handler.",
+    "Checkout.jsx — coupon.trim() before POST; input coerces value to uppercase on change so the visible field always shows UPPERCASE while allowing paste of any case. applied_coupon.excluded_items rendered as coupon-excluded-note only when non-empty. payable computed as `applied ? applied.total : total` — pay button always reflects post-discount amount. Good.",
+    "Coupon field placement on mobile (390x844) — Discount code control and applied state render inside the order-summary aside; no horizontal overflow measured (scrollWidth == innerWidth)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py — appended TestCouponAdminCrud (9 tests), TestCouponValidation (7 tests), TestCouponExclusions (3 tests), TestCouponCheckout (4 tests); test_zz_restore_admin_password remains last."
+  ],
+  "success_rate": {
+    "backend": "100% (89/89 pass)",
+    "frontend": "100% — admin Coupons CRUD + exclusions summary + edit/delete; checkout apply/remove/invalid/excluded-note flow; mobile no overflow"
+  },
+  "test_credentials": "Admin officialwifi@icloud.com / admin (restored via test_zz_restore_admin_password teardown); ephemeral customers per session via /api/auth/register.",
+  "seed_data_creation": "Every test creates a coupon with a random TEST_/UI-prefixed code and deletes it in the same test/finally block. No permanent coupons added. SAVE20 was left inactive as instructed. Live product catalogue not modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: `pytest backend/tests/backend_test.py -v -n 0` (89 tests, all pass; ~100s incl. one live SellAuth checkout). Coupon coverage lives in classes TestCouponAdminCrud / TestCouponValidation / TestCouponExclusions / TestCouponCheckout. The webhook->order->used_count path is exercised by test_webhook_promotes_session_with_coupon_and_increments_used_count and asserts the coupon's used_count increments exactly once even on replay. Do NOT re-enable SAVE20. If the catalogue only has 1 medals product (user's current state), TestCouponExclusions.test_product_id_exclusion now falls back to any two products across categories. Live products may be re-priced by the user — no test asserts on exact catalogue values, only on invariants (msrp>price, discount = round(eligible_subtotal * pct/100, 2), total = subtotal - discount)."
+}

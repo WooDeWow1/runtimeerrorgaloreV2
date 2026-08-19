@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Eye, KeyRound, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { BarChart3, Eye, KeyRound, Pencil, Plus, Star, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, CATEGORY_LABELS, money, STATUS_LABELS } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -13,6 +13,11 @@ const EMPTY = {
   coins: "", badge: "", active: true, coming_soon: false,
 };
 
+const EMPTY_COUPON = {
+  code: "", percent_off: "", active: true, excluded_product_ids: [], excluded_categories: [],
+  min_subtotal: "", max_uses: "", note: "",
+};
+
 export default function Admin() {
   const [tab, setTab] = useState("orders");
   const [orders, setOrders] = useState([]);
@@ -24,6 +29,11 @@ export default function Admin() {
   const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm: "" });
   const [pwdBusy, setPwdBusy] = useState(false);
   const [stats, setStats] = useState(null);
+  const [coupons, setCoupons] = useState([]);
+  const [couponForm, setCouponForm] = useState(EMPTY_COUPON);
+  const [editingCoupon, setEditingCoupon] = useState(null);
+
+  const loadCoupons = () => api.get("/admin/coupons").then(({ data }) => setCoupons(data)).catch(() => {});
 
   const loadOrders = () => api.get("/admin/orders").then(({ data }) => setOrders(data)).catch(() => {});
   const loadProducts = () =>
@@ -37,7 +47,67 @@ export default function Admin() {
 
   useEffect(() => {
     if (tab === "settings") loadStats();
+    if (tab === "coupons") loadCoupons();
   }, [tab]);
+
+  const setCoupon = (k) => (e) =>
+    setCouponForm({
+      ...couponForm,
+      [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
+    });
+
+  const toggleExclusion = (field, value) =>
+    setCouponForm((prev) => ({
+      ...prev,
+      [field]: prev[field].includes(value)
+        ? prev[field].filter((v) => v !== value)
+        : [...prev[field], value],
+    }));
+
+  const saveCoupon = async (e) => {
+    e.preventDefault();
+    const payload = {
+      code: couponForm.code.trim().toUpperCase(),
+      percent_off: parseFloat(couponForm.percent_off),
+      active: couponForm.active,
+      excluded_product_ids: couponForm.excluded_product_ids,
+      excluded_categories: couponForm.excluded_categories,
+      min_subtotal: couponForm.min_subtotal === "" ? null : parseFloat(couponForm.min_subtotal),
+      max_uses: couponForm.max_uses === "" ? null : parseInt(couponForm.max_uses, 10),
+      note: couponForm.note,
+    };
+    try {
+      if (editingCoupon) await api.put(`/admin/coupons/${editingCoupon}`, payload);
+      else await api.post("/admin/coupons", payload);
+      toast.success(editingCoupon ? "Coupon updated" : `Coupon ${payload.code} created`);
+      setCouponForm(EMPTY_COUPON);
+      setEditingCoupon(null);
+      loadCoupons();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const editCoupon = (c) => {
+    setEditingCoupon(c.id);
+    setCouponForm({
+      code: c.code, percent_off: String(c.percent_off), active: c.active,
+      excluded_product_ids: c.excluded_product_ids || [],
+      excluded_categories: c.excluded_categories || [],
+      min_subtotal: c.min_subtotal ?? "", max_uses: c.max_uses ?? "", note: c.note || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const removeCoupon = async (id) => {
+    try {
+      await api.delete(`/admin/coupons/${id}`);
+      toast.success("Coupon deleted");
+      loadCoupons();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
   const changePassword = async (e) => {
     e.preventDefault();
@@ -144,6 +214,7 @@ export default function Admin() {
         {[
           { key: "orders", label: "orders" },
           { key: "products", label: "products" },
+          { key: "coupons", label: "coupons" },
           { key: "settings", label: "settings & analytics" },
         ].map((t) => (
           <button
@@ -172,7 +243,15 @@ export default function Admin() {
                   <p className="mt-2 text-xs text-zinc-300">
                     {o.items.map((i) => `${i.name} ×${i.quantity}`).join(" · ")}
                   </p>
-                  <p className="mt-1 text-xs text-[#00ffcc]">{money(o.total)} · payment {o.payment_status}</p>
+          <p className="mt-1 text-xs text-[#00ffcc]">
+            {money(o.total)}
+            {o.discount > 0 && (
+              <span className="text-zinc-500">
+                {" "}· {o.coupon_code} -{money(o.discount)}
+              </span>
+            )}
+            {" "}· payment {o.payment_status}
+          </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <StatusBadge status={o.status} testId={`admin-order-status-${o.id}`} />
@@ -336,6 +415,159 @@ export default function Admin() {
                         className="border border-zinc-800 p-2 text-zinc-400 hover:border-[#ff3b30] hover:text-[#ff3b30]">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "coupons" && (
+        <div className="mt-10 grid gap-10 lg:grid-cols-12">
+          <form
+            onSubmit={saveCoupon}
+            data-testid="coupon-form"
+            className="space-y-4 border border-[#1f1f1f] bg-[#0a0a0a] p-6 lg:col-span-5"
+          >
+            <h2 className="flex items-center gap-2 font-display text-sm uppercase tracking-[0.2em]">
+              <Tag className="h-4 w-4 text-[#00ffcc]" /> {editingCoupon ? "Edit coupon" : "New coupon"}
+            </h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={label}>Code</label>
+                <input data-testid="coupon-code-input" className={`${input} uppercase`} required minLength={3}
+                       value={couponForm.code} onChange={setCoupon("code")} />
+              </div>
+              <div>
+                <label className={label}>% off</label>
+                <input data-testid="coupon-percent-input" className={input} type="number" step="1" min="1" max="100"
+                       required value={couponForm.percent_off} onChange={setCoupon("percent_off")} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={label}>Min spend (optional)</label>
+                <input data-testid="coupon-min-input" className={input} type="number" step="0.01" min="0"
+                       value={couponForm.min_subtotal} onChange={setCoupon("min_subtotal")} />
+              </div>
+              <div>
+                <label className={label}>Max uses (optional)</label>
+                <input data-testid="coupon-max-uses-input" className={input} type="number" min="1"
+                       value={couponForm.max_uses} onChange={setCoupon("max_uses")} />
+              </div>
+            </div>
+            <div>
+              <label className={label}>Internal note</label>
+              <input data-testid="coupon-note-input" className={input} value={couponForm.note} onChange={setCoupon("note")} />
+            </div>
+
+            <div>
+              <label className={label}>Excluded categories</label>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(CATEGORY_LABELS).map(([key, lbl]) => {
+                  const on = couponForm.excluded_categories.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      data-testid={`exclude-category-${key}`}
+                      onClick={() => toggleExclusion("excluded_categories", key)}
+                      className={`border px-3 py-1.5 text-[9px] uppercase tracking-[0.2em] transition-colors ${
+                        on ? "border-[#ff3b30] text-[#ff3b30]" : "border-zinc-800 text-zinc-500 hover:text-white"
+                      }`}
+                    >
+                      {on ? "✕ " : ""}{lbl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className={label}>Excluded products</label>
+              <div className="max-h-44 space-y-1.5 overflow-y-auto border border-zinc-900 p-3">
+                {products.map((p) => {
+                  const on = couponForm.excluded_product_ids.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      data-testid={`exclude-product-${p.id}`}
+                      className="flex cursor-pointer items-center gap-2 text-[11px] text-zinc-400"
+                    >
+                      <input type="checkbox" checked={on}
+                             onChange={() => toggleExclusion("excluded_product_ids", p.id)} />
+                      <span className={on ? "text-[#ff3b30]" : ""}>{p.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+                Excluded items stay at full price; the discount only applies to the rest of the cart.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+              <input data-testid="coupon-active-checkbox" type="checkbox" checked={couponForm.active}
+                     onChange={setCoupon("active")} />
+              Active
+            </label>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                data-testid="save-coupon-btn"
+                className="flex flex-1 items-center justify-center gap-2 border border-[#00ffcc] py-3 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
+              >
+                <Plus className="h-3 w-3" /> {editingCoupon ? "Update" : "Create"}
+              </button>
+              {editingCoupon && (
+                <button type="button" data-testid="cancel-coupon-edit-btn"
+                        onClick={() => { setEditingCoupon(null); setCouponForm(EMPTY_COUPON); }}
+                        className="border border-zinc-800 px-5 text-[10px] uppercase tracking-[0.25em] text-zinc-400">
+                  Cancel
+                </button>
+              )}
+            </div>
+          </form>
+
+          <div className="space-y-4 lg:col-span-7" data-testid="coupons-list">
+            {coupons.length === 0 && <p className="text-xs text-zinc-600">No coupons yet.</p>}
+            {coupons.map((c) => (
+              <div key={c.id} data-testid={`coupon-row-${c.code}`}
+                   className="border border-[#1f1f1f] bg-[#0a0a0a] p-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="font-display text-base text-[#00ffcc]">
+                      {c.code} <span className="text-white">· {c.percent_off}% off</span>
+                    </p>
+                    <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                      {c.active ? "Active" : "Disabled"} · used {c.used_count}
+                      {c.max_uses ? `/${c.max_uses}` : ""}
+                      {c.min_subtotal ? ` · min ${money(c.min_subtotal)}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button data-testid={`edit-coupon-${c.code}`} onClick={() => editCoupon(c)}
+                            className="border border-zinc-800 p-2 text-zinc-400 hover:border-[#00ffcc] hover:text-[#00ffcc]">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button data-testid={`delete-coupon-${c.code}`} onClick={() => removeCoupon(c.id)}
+                            className="border border-zinc-800 p-2 text-zinc-400 hover:border-[#ff3b30] hover:text-[#ff3b30]">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {(c.excluded_categories?.length > 0 || c.excluded_product_ids?.length > 0) && (
+                  <p data-testid={`coupon-exclusions-${c.code}`}
+                     className="mt-4 border-t border-zinc-900 pt-3 text-[10px] leading-relaxed text-[#f4d03f]">
+                    Excludes:{" "}
+                    {[
+                      ...(c.excluded_categories || []).map((k) => CATEGORY_LABELS[k] || k),
+                      ...(c.excluded_product_ids || []).map(
+                        (id) => products.find((p) => p.id === id)?.name || "deleted product"
+                      ),
+                    ].join(" · ")}
+                  </p>
+                )}
+                {c.note && <p className="mt-2 text-[10px] text-zinc-600">{c.note}</p>}
               </div>
             ))}
           </div>

@@ -100,6 +100,7 @@ class CheckoutRequest(BaseModel):
     ptc_password: str = Field(min_length=1)
     origin_url: str
     email: Optional[EmailStr] = None
+    coupon_code: Optional[str] = None
 
 
 class Order(BaseDocument):
@@ -107,6 +108,9 @@ class Order(BaseDocument):
     user_email: str
     items: List[OrderItem]
     total: float
+    subtotal: Optional[float] = None
+    discount: float = 0.0
+    coupon_code: Optional[str] = None
     status: str = "awaiting_payment"
     payment_status: str = "pending"
     session_id: Optional[str] = None
@@ -122,6 +126,37 @@ class StatusUpdate(BaseModel):
 
 class FeaturedUpdate(BaseModel):
     is_featured: bool
+
+
+class CouponIn(BaseModel):
+    code: str = Field(min_length=3, max_length=32)
+    percent_off: float = Field(gt=0, le=100)
+    active: bool = True
+    excluded_product_ids: List[str] = Field(default_factory=list)
+    excluded_categories: List[str] = Field(default_factory=list)
+    min_subtotal: Optional[float] = Field(default=None, ge=0)
+    max_uses: Optional[int] = Field(default=None, ge=1)
+    expires_at: Optional[datetime] = None
+    note: str = ""
+
+
+class Coupon(BaseDocument):
+    code: str
+    percent_off: float
+    active: bool = True
+    excluded_product_ids: List[str] = Field(default_factory=list)
+    excluded_categories: List[str] = Field(default_factory=list)
+    min_subtotal: Optional[float] = None
+    max_uses: Optional[int] = None
+    used_count: int = 0
+    expires_at: Optional[datetime] = None
+    note: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class CouponValidateRequest(BaseModel):
+    code: str
+    items: List["CartItemIn"]
 
 
 class MessageIn(BaseModel):

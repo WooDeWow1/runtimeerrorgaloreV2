@@ -812,6 +812,421 @@ class TestFeaturedToggle:
         requests.delete(f"{API}/products/{pid}", headers=auth(admin_token))
 
 
+# ---------------- Coupon Admin CRUD (iteration 8) ----------------
+def _coupon_payload(code=None, **overrides):
+    payload = {
+        "code": code or f"TEST{uuid.uuid4().hex[:6].upper()}",
+        "percent_off": 10.0,
+        "active": True,
+        "excluded_product_ids": [],
+        "excluded_categories": [],
+        "min_subtotal": None,
+        "max_uses": None,
+        "note": "",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestCouponAdminCrud:
+    def test_list_requires_admin(self, customer):
+        assert requests.get(f"{API}/admin/coupons").status_code == 401
+        assert requests.get(f"{API}/admin/coupons",
+                            headers=auth(customer["token"])).status_code == 403
+
+    def test_create_requires_admin(self, customer):
+        p = _coupon_payload()
+        assert requests.post(f"{API}/admin/coupons", json=p).status_code == 401
+        assert requests.post(f"{API}/admin/coupons", headers=auth(customer["token"]),
+                             json=p).status_code == 403
+
+    def test_create_and_uppercase_code(self, admin_token):
+        code = f"test{uuid.uuid4().hex[:6]}"
+        p = _coupon_payload(code=code, percent_off=15.0, note="hi")
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token), json=p)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["code"] == code.upper()
+        assert data["percent_off"] == 15.0
+        assert data["used_count"] == 0
+        assert data["note"] == "hi"
+        # Verify listed
+        listing = requests.get(f"{API}/admin/coupons", headers=auth(admin_token)).json()
+        assert any(c["code"] == code.upper() for c in listing)
+        # Cleanup
+        requests.delete(f"{API}/admin/coupons/{data['id']}", headers=auth(admin_token))
+
+    def test_duplicate_code_returns_400(self, admin_token):
+        code = f"DUP{uuid.uuid4().hex[:6].upper()}"
+        r1 = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                           json=_coupon_payload(code=code))
+        assert r1.status_code == 200
+        cid = r1.json()["id"]
+        r2 = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                           json=_coupon_payload(code=code.lower()))
+        assert r2.status_code == 400
+        assert "exists" in r2.json()["detail"].lower()
+        requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_percent_out_of_range_422(self, admin_token):
+        r_zero = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                               json=_coupon_payload(percent_off=0))
+        assert r_zero.status_code == 422
+        r_over = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                               json=_coupon_payload(percent_off=101))
+        assert r_over.status_code == 422
+
+    def test_unknown_category_400(self, admin_token):
+        r = requests.post(
+            f"{API}/admin/coupons",
+            headers=auth(admin_token),
+            json=_coupon_payload(excluded_categories=["nonsense_cat"]),
+        )
+        assert r.status_code == 400
+        assert "unknown category" in r.json()["detail"].lower()
+
+    def test_optional_fields_accepted(self, admin_token):
+        p = _coupon_payload(min_subtotal=25.0, max_uses=3, note="promo")
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token), json=p)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["min_subtotal"] == 25.0 and data["max_uses"] == 3
+        requests.delete(f"{API}/admin/coupons/{data['id']}", headers=auth(admin_token))
+
+    def test_put_updates_all_fields(self, admin_token):
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(percent_off=5))
+        cid = r.json()["id"]
+        upd = _coupon_payload(code=r.json()["code"], percent_off=25, active=False,
+                              excluded_categories=["stardust"], min_subtotal=10, note="upd")
+        r2 = requests.put(f"{API}/admin/coupons/{cid}", headers=auth(admin_token), json=upd)
+        assert r2.status_code == 200, r2.text
+        data = r2.json()
+        assert data["percent_off"] == 25 and data["active"] is False
+        assert "stardust" in data["excluded_categories"]
+        assert data["min_subtotal"] == 10 and data["note"] == "upd"
+        requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_delete_bogus_id_404(self, admin_token):
+        r = requests.delete(f"{API}/admin/coupons/000000000000000000000000",
+                            headers=auth(admin_token))
+        assert r.status_code == 404
+
+
+# ---------------- Coupon validation endpoint (iteration 8) ----------------
+class TestCouponValidation:
+    @pytest.fixture
+    def coupon_20(self, admin_token):
+        code = f"VAL{uuid.uuid4().hex[:6].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=20))
+        cid = r.json()["id"]
+        yield {"id": cid, "code": code}
+        requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_validate_public_no_auth(self, coupon_20):
+        bundle = _find("pokecoin_bundle")
+        r = requests.post(f"{API}/coupons/validate", json={
+            "code": coupon_20["code"],
+            "items": [{"product_id": bundle["id"], "quantity": 1}],
+        })
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["coupon_code"] == coupon_20["code"]
+        assert data["percent_off"] == 20
+        assert data["subtotal"] == round(bundle["price"], 2)
+        assert data["discount"] == round(bundle["price"] * 0.2, 2)
+        assert data["total"] == round(data["subtotal"] - data["discount"], 2)
+        assert data["excluded_items"] == []
+
+    def test_case_insensitive_code(self, coupon_20):
+        bundle = _find("pokecoin_bundle")
+        r = requests.post(f"{API}/coupons/validate", json={
+            "code": coupon_20["code"].lower(),
+            "items": [{"product_id": bundle["id"], "quantity": 1}],
+        })
+        assert r.status_code == 200 and r.json()["coupon_code"] == coupon_20["code"]
+
+    def test_unknown_code_400(self):
+        bundle = _find("pokecoin_bundle")
+        r = requests.post(f"{API}/coupons/validate", json={
+            "code": "NEVEREXIST_XYZ",
+            "items": [{"product_id": bundle["id"], "quantity": 1}],
+        })
+        assert r.status_code == 400
+        assert "not valid" in r.json()["detail"].lower()
+
+    def test_inactive_coupon_400(self, admin_token):
+        code = f"INACT{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, active=False))
+        cid = r.json()["id"]
+        bundle = _find("pokecoin_bundle")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code, "items": [{"product_id": bundle["id"], "quantity": 1}],
+            })
+            assert r2.status_code == 400
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_expired_coupon_400(self, admin_token):
+        code = f"EXP{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code))
+        cid = r.json()["id"]
+        # Force expires_at in the past via direct db update
+        db.coupons.update_one({"_id": ObjectId(cid)},
+                              {"$set": {"expires_at": __import__("datetime").datetime.utcnow() - timedelta(days=1)}})
+        bundle = _find("pokecoin_bundle")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code, "items": [{"product_id": bundle["id"], "quantity": 1}],
+            })
+            assert r2.status_code == 400
+            assert "expired" in r2.json()["detail"].lower()
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_usage_limit_400(self, admin_token):
+        code = f"USED{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, max_uses=1))
+        cid = r.json()["id"]
+        db.coupons.update_one({"_id": ObjectId(cid)}, {"$set": {"used_count": 1}})
+        bundle = _find("pokecoin_bundle")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code, "items": [{"product_id": bundle["id"], "quantity": 1}],
+            })
+            assert r2.status_code == 400
+            assert "usage limit" in r2.json()["detail"].lower()
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_min_subtotal_400(self, admin_token):
+        code = f"MIN{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, min_subtotal=9999.0))
+        cid = r.json()["id"]
+        bundle = _find("pokecoin_bundle")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code, "items": [{"product_id": bundle["id"], "quantity": 1}],
+            })
+            assert r2.status_code == 400
+            assert "9999" in r2.json()["detail"] or "spend" in r2.json()["detail"].lower()
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+
+# ---------------- Coupon exclusions (iteration 8) ----------------
+class TestCouponExclusions:
+    def test_category_exclusion_all_excluded_400(self, admin_token):
+        code = f"CATX{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=20,
+                                               excluded_categories=["stardust"]))
+        cid = r.json()["id"]
+        stardust = _find("stardust")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code,
+                "items": [{"product_id": stardust["id"], "quantity": 1}],
+            })
+            assert r2.status_code == 400
+            assert "does not apply" in r2.json()["detail"].lower()
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_category_exclusion_mixed_cart_discounts_only_eligible(self, admin_token):
+        code = f"MIX{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=20,
+                                               excluded_categories=["stardust"]))
+        cid = r.json()["id"]
+        bundle = _find("pokecoin_bundle")
+        stardust = _find("stardust")
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code,
+                "items": [
+                    {"product_id": bundle["id"], "quantity": 1},
+                    {"product_id": stardust["id"], "quantity": 1},
+                ],
+            })
+            assert r2.status_code == 200, r2.text
+            data = r2.json()
+            expected_subtotal = round(bundle["price"] + stardust["price"], 2)
+            expected_eligible = round(bundle["price"], 2)
+            expected_discount = round(expected_eligible * 0.20, 2)
+            assert data["subtotal"] == expected_subtotal
+            assert data["eligible_subtotal"] == expected_eligible
+            assert data["discount"] == expected_discount
+            assert data["total"] == round(expected_subtotal - expected_discount, 2)
+            assert stardust["name"] in data["excluded_items"]
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_product_id_exclusion(self, admin_token):
+        # Exclude one specific product; verify only that product is excluded in a mixed cart.
+        products = [p for p in _products() if not p.get("coming_soon")]
+        # Prefer two products in the same category to demonstrate category-independence of the rule.
+        same_cat_pair = None
+        by_cat = {}
+        for p in products:
+            by_cat.setdefault(p["category"], []).append(p)
+        for cat, plist in by_cat.items():
+            if len(plist) >= 2:
+                same_cat_pair = (plist[0], plist[1])
+                break
+        if same_cat_pair is None:
+            # Fallback: use two distinct products across categories
+            if len(products) < 2:
+                pytest.skip("need at least 2 purchasable products")
+            same_cat_pair = (products[0], products[1])
+        excluded, eligible_same_cat = same_cat_pair
+        code = f"PID{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=10,
+                                               excluded_product_ids=[excluded["id"]]))
+        cid = r.json()["id"]
+        try:
+            r2 = requests.post(f"{API}/coupons/validate", json={
+                "code": code,
+                "items": [
+                    {"product_id": excluded["id"], "quantity": 1},
+                    {"product_id": eligible_same_cat["id"], "quantity": 1},
+                ],
+            })
+            assert r2.status_code == 200, r2.text
+            data = r2.json()
+            assert excluded["name"] in data["excluded_items"]
+            assert eligible_same_cat["name"] not in data["excluded_items"]
+            expected_eligible = round(eligible_same_cat["price"], 2)
+            assert data["eligible_subtotal"] == expected_eligible
+            assert data["discount"] == round(expected_eligible * 0.10, 2)
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+
+# ---------------- Coupon at checkout (iteration 8) ----------------
+class TestCouponCheckout:
+    def test_checkout_applies_discount_server_side_and_stores_on_session(self, admin_token, customer):
+        code = f"CO{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=10))
+        cid = r.json()["id"]
+        bundle = _find("pokecoin_bundle")
+        try:
+            r2 = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
+                "items": [{"product_id": bundle["id"], "quantity": 1}],
+                "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
+                "coupon_code": code.lower(),
+            })
+            assert r2.status_code in (200, 502, 503), r2.text
+            if r2.status_code == 200:
+                sid = r2.json()["session_id"]
+                sess = db.checkout_sessions.find_one({"_id": ObjectId(sid)})
+                expected_subtotal = round(bundle["price"], 2)
+                expected_discount = round(expected_subtotal * 0.10, 2)
+                assert sess["coupon_code"] == code
+                assert abs(sess["subtotal"] - expected_subtotal) < 0.01
+                assert abs(sess["discount"] - expected_discount) < 0.01
+                assert abs(sess["total"] - (expected_subtotal - expected_discount)) < 0.01
+                db.checkout_sessions.delete_one({"_id": ObjectId(sid)})
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_checkout_invalid_coupon_400_no_orphan_session(self, customer):
+        bundle = _find("pokecoin_bundle")
+        before_s = db.checkout_sessions.count_documents({})
+        before_o = db.orders.count_documents({})
+        r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
+            "items": [{"product_id": bundle["id"], "quantity": 1}],
+            "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
+            "coupon_code": "NEVEREXIST_ABC",
+        })
+        assert r.status_code == 400
+        assert db.checkout_sessions.count_documents({}) == before_s
+        assert db.orders.count_documents({}) == before_o
+
+    def test_event_pass_bundle_rule_precedes_coupon_error(self, admin_token, customer):
+        # Even with a coupon, event-pass-only should return the bundle error, not a coupon error.
+        code = f"EPC{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=10))
+        cid = r.json()["id"]
+        ep = _find("event_pass")
+        try:
+            r2 = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
+                "items": [{"product_id": ep["id"], "quantity": 1}],
+                "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
+                "coupon_code": code,
+            })
+            assert r2.status_code == 400
+            assert "Pok" in r2.json()["detail"]
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+    def test_webhook_promotes_session_with_coupon_and_increments_used_count(self, admin_token):
+        # Create coupon
+        code = f"WHK{uuid.uuid4().hex[:5].upper()}"
+        r = requests.post(f"{API}/admin/coupons", headers=auth(admin_token),
+                          json=_coupon_payload(code=code, percent_off=10))
+        cid = r.json()["id"]
+        # Insert a session directly carrying coupon fields
+        bundle = _find("pokecoin_bundle")
+        now = __import__("datetime").datetime.utcnow()
+        subtotal = round(bundle["price"], 2)
+        discount = round(subtotal * 0.10, 2)
+        total = round(subtotal - discount, 2)
+        session_doc = {
+            "items": [{"product_id": bundle["id"], "name": bundle["name"],
+                       "category": bundle["category"], "price": bundle["price"], "quantity": 1}],
+            "total": total,
+            "subtotal": subtotal,
+            "discount": discount,
+            "coupon_code": code,
+            "user_id": "",
+            "email": "delivered@resend.dev",
+            "origin_url": BASE_URL,
+            "ptc_username_enc": "gAAAAABtest_cu",
+            "ptc_password_enc": "gAAAAABtest_cp",
+            "status": "awaiting_payment",
+            "created_at": now,
+            "expires_at": now + timedelta(minutes=TTL_MIN),
+        }
+        sid = str(db.checkout_sessions.insert_one(session_doc).inserted_id)
+        try:
+            invoice_id = f"inv-{uuid.uuid4().hex[:8]}"
+            raw = json.dumps({"invoice": {"id": invoice_id, "status": "completed",
+                                          "custom_fields": {"checkout_session_id": sid}}}).encode()
+            sig = _sign(raw)
+            r_wh = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
+                                 headers={"signature": sig, "content-type": "application/json"},
+                                 timeout=60)
+            assert r_wh.status_code == 200, r_wh.text
+            order_id = r_wh.json().get("order_id")
+            assert order_id
+            order = db.orders.find_one({"_id": ObjectId(order_id)})
+            assert order["coupon_code"] == code
+            assert abs(order["discount"] - discount) < 0.01
+            assert abs(order["subtotal"] - subtotal) < 0.01
+            assert abs(order["total"] - total) < 0.01
+            coupon_doc = db.coupons.find_one({"_id": ObjectId(cid)})
+            assert coupon_doc["used_count"] == 1
+            # Replay -> no double increment
+            r_wh2 = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
+                                  headers={"signature": sig, "content-type": "application/json"})
+            assert r_wh2.status_code == 200
+            assert r_wh2.json().get("duplicate") is True
+            coupon_doc2 = db.coupons.find_one({"_id": ObjectId(cid)})
+            assert coupon_doc2["used_count"] == 1
+        finally:
+            requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
+
+
 # ---------------- Restore admin password to 'admin' at end of session ----------------
 def test_zz_restore_admin_password():
     """Runs last (alphabetically after all TestX classes). Restores admin password to 'admin'
