@@ -56,7 +56,7 @@ from security import (  # noqa: E402
     verify_password,
 )
 import sellauth  # noqa: E402
-from emailer import order_tracking_html, send_email, support_reply_html  # noqa: E402
+from emailer import order_tracking_html, order_url, send_email, support_reply_html  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -622,17 +622,21 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     await notify(session.get("user_id", ""), order_id, "Order received",
                  "Payment confirmed. Your order is queued — an operator will pick it up shortly.")
 
-    tracking_url = f"{session['origin_url']}/order/{order_id}"
-    await send_email(
-        to=session["email"],
-        subject=f"Payment received — track your {os.environ['EMAIL_FROM_NAME']} order",
-        html=order_tracking_html(
-            order_id=order_id,
-            tracking_url=tracking_url,
-            total=session["total"],
-            item_lines=[f"{i['name']} x{i['quantity']}" for i in session["items"]],
-        ),
-    )
+    tracking_url = order_url({"origin_url": session.get("origin_url", ""), "id": order_id})
+    # A provider hiccup must never undo a paid order.
+    try:
+        await send_email(
+            to=session["email"],
+            subject=f"Payment received — track your {os.environ['EMAIL_FROM_NAME']} order",
+            html=order_tracking_html(
+                order_id=order_id,
+                tracking_url=tracking_url,
+                total=session["total"],
+                item_lines=[f"{i['name']} x{i['quantity']}" for i in session["items"]],
+            ),
+        )
+    except Exception as exc:
+        logger.error("Order confirmation email failed for %s: %s", order_id, exc)
     return order_id
 
 
@@ -814,17 +818,18 @@ async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] =
     if role == "admin":
         await notify(order.get("user_id", ""), order_id, "New message from support", payload.body[:140])
         # Guests have no bell, so email is the only way they hear back.
-        base = (order.get("origin_url") or "").rstrip("/")
-        if base.startswith("https://"):
+        try:
             await send_email(
                 to=order["user_email"],
                 subject=f"Reply from {os.environ['EMAIL_FROM_NAME']} support",
                 html=support_reply_html(
                     order_id=order_id,
                     body=payload.body,
-                    order_url=f"{base}/order/{order_id}",
+                    order_url=order_url({"origin_url": order.get("origin_url", ""), "id": order_id}),
                 ),
             )
+        except Exception as exc:
+            logger.error("Support reply email failed for %s: %s", order_id, exc)
     msg.id = str(result.inserted_id)
     return msg.model_dump(by_alias=False)
 

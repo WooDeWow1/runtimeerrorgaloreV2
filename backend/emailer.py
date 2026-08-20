@@ -85,6 +85,20 @@ def _assert_safe_email(subject: str, html: str) -> None:
                 raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
 
 
+def _site_url() -> str:
+    """Public site URL used in email chrome. Must be https for the G3 link gate."""
+    url = os.environ.get("PUBLIC_APP_URL", "").rstrip("/")
+    return url if url.startswith("https://") else "https://pokecoins.cc"
+
+
+def order_url(order: dict) -> str:
+    """Absolute link to an order page, falling back to the configured public site."""
+    base = (order.get("origin_url") or "").rstrip("/")
+    if not base.startswith("https://"):
+        base = _site_url()
+    return f"{base}/order/{order['id'] if 'id' in order else order['_id']}"
+
+
 async def send_email(*, to: str, subject: str, html: str) -> str | None:
     _assert_safe_email(subject, html)
     payload = {
@@ -113,39 +127,64 @@ async def send_email(*, to: str, subject: str, html: str) -> str | None:
         return None
 
 
-def support_reply_html(*, order_id: str, body: str, order_url: str) -> str:
+def _wrap(inner: str) -> str:
+    """Shared pokecoins.cc branded shell: dark header wordmark + neon accent."""
     brand = escape(os.environ["EMAIL_FROM_NAME"])
+    site = escape(_site_url())
     return (
-        '<table role="presentation" width="100%"><tr><td style="padding:24px;'
-        'font-family:Arial,sans-serif;color:#111">'
-        f"<h2 style=\"margin:0 0 12px\">New reply about order {escape(order_id[-8:])}</h2>"
-        f'<blockquote style="margin:0 0 16px;padding:12px 16px;border-left:3px solid #00ffcc;'
-        f'background:#f6f6f6;white-space:pre-wrap">{escape(body)}</blockquote>'
-        f'<p><a href="{escape(order_url)}" style="background:#00ffcc;color:#000;padding:12px 20px;'
-        'text-decoration:none;font-weight:bold;display:inline-block">Open order chat</a></p>'
-        f'<p style="font-size:12px;color:#555">Or open this link: {escape(order_url)}</p>'
-        f'<p style="font-size:12px;color:#888">Sent by {brand}. We never ask for your password or payment '
-        "details by email.</p>"
-        "</td></tr></table>"
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background:#f4f4f5;padding:24px 0"><tr><td align="center">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="max-width:560px;background:#ffffff;border:1px solid #e4e4e7">'
+        '<tr><td style="background:#050505;padding:20px 24px">'
+        f'<a href="{site}" style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;'
+        f'letter-spacing:-0.5px;color:#ffffff;text-decoration:none">POKE'
+        '<span style="color:#00e6b8">COINS</span></a>'
+        '</td></tr>'
+        f'<tr><td style="padding:28px 24px;font-family:Arial,sans-serif;color:#18181b">{inner}</td></tr>'
+        '<tr><td style="border-top:1px solid #e4e4e7;padding:16px 24px;'
+        'font-family:Arial,sans-serif;font-size:11px;color:#71717a">'
+        f'Sent by {brand} · <a href="{site}" style="color:#71717a">{site}</a><br>'
+        'We never ask for your password or payment details by email.'
+        '</td></tr></table></td></tr></table>'
+    )
+
+
+def _button(url: str, label: str) -> str:
+    return (
+        f'<p style="margin:24px 0"><a href="{escape(url)}" style="background:#00e6b8;color:#050505;'
+        'padding:13px 22px;text-decoration:none;font-weight:bold;font-size:14px;'
+        f'display:inline-block;border-radius:2px">{escape(label)}</a></p>'
+        f'<p style="font-size:11px;color:#71717a;margin:0">Or paste this link into your browser:<br>'
+        f'{escape(url)}</p>'
+    )
+
+
+def support_reply_html(*, order_id: str, body: str, order_url: str) -> str:
+    return _wrap(
+        f'<h2 style="margin:0 0 14px;font-size:19px">New reply about order {escape(order_id[-8:])}</h2>'
+        f'<blockquote style="margin:0;padding:14px 16px;border-left:3px solid #00e6b8;'
+        f'background:#fafafa;font-size:14px;line-height:1.6;white-space:pre-wrap">{escape(body)}</blockquote>'
+        + _button(order_url, "Open order chat")
     )
 
 
 def order_tracking_html(*, order_id: str, tracking_url: str, total: float, item_lines: list[str]) -> str:
     brand = escape(os.environ["EMAIL_FROM_NAME"])
-    items = "".join(f"<li>{escape(line)}</li>" for line in item_lines)
-    return (
-        '<table role="presentation" width="100%"><tr><td style="padding:24px;'
-        'font-family:Arial,sans-serif;color:#111">'
-        f"<h2 style=\"margin:0 0 12px\">Payment received — order {escape(order_id[-8:])}</h2>"
-        f"<p>Thanks for your order with {brand}. Your order is queued for fulfilment.</p>"
-        f'<ul style="padding-left:18px">{items}</ul>'
-        f"<p><strong>Total paid: ${total:.2f}</strong></p>"
-        f'<p><a href="{escape(tracking_url)}" style="background:#00ffcc;color:#000;padding:12px 20px;'
-        'text-decoration:none;font-weight:bold;display:inline-block">Track your order</a></p>'
-        f'<p style="font-size:12px;color:#555">Or open this link: {escape(tracking_url)}</p>'
-        '<p style="font-size:12px;color:#555">When an operator logs in you will see the status change to '
-        "Processing — stay logged out of your game account until it says Completed.</p>"
-        f'<p style="font-size:12px;color:#888">Sent by {brand}. We never ask for your password or payment '
-        "details by email.</p>"
-        "</td></tr></table>"
+    items = "".join(
+        f'<li style="margin-bottom:4px">{escape(line)}</li>' for line in item_lines
     )
+    return _wrap(
+        f'<h2 style="margin:0 0 14px;font-size:19px">Payment received — order {escape(order_id[-8:])}</h2>'
+        f'<p style="margin:0 0 16px;font-size:14px;line-height:1.6">Thanks for your order with {brand}. '
+        'Payment is confirmed and your order is queued for fulfilment.</p>'
+        f'<ul style="padding-left:18px;font-size:14px;margin:0 0 12px">{items}</ul>'
+        f'<p style="font-size:14px;margin:0"><strong>Total paid: ${total:.2f}</strong></p>'
+        + _button(tracking_url, "Track order & chat with us")
+        + '<p style="font-size:13px;line-height:1.6;color:#3f3f46;margin:20px 0 0">'
+        'That page has a live chat built in — message us there any time and we reply straight to you.</p>'
+        '<p style="font-size:13px;line-height:1.6;color:#3f3f46;margin:12px 0 0">'
+        'When an operator logs in, the status changes to <strong>Processing</strong> — please stay logged '
+        'out of your game account until it says Completed.</p>'
+    )
+

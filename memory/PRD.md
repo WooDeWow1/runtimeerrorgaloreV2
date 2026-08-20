@@ -94,6 +94,17 @@ production — run it after adding products, since ids differ per database.
   `order.origin_url` which is now persisted on the order.
 - Login lockout is keyed on the forwarded client IP (`client_ip`) so 5 failures actually lock.
 
+## Order confirmation email (2026-06)
+- Fires from the SellAuth webhook path in `create_order_from_session`, so it only sends once
+  payment is confirmed. Idempotent: a repeated webhook returns the existing order and re-sends nothing.
+- Branded pokecoins.cc shell (`_wrap` in emailer.py): dark header POKE/COINS wordmark, neon
+  #00e6b8 CTA, footer linking pokecoins.cc. Same shell used for admin chat replies.
+- CTA "Track order & chat with us" links to `{origin_url}/order/{id}`, which falls back to
+  `PUBLIC_APP_URL` (https://pokecoins.cc) via `emailer.order_url()` when origin is missing or
+  not https — the old code silently produced a relative link and tripped the G3 link gate.
+- Both sends are wrapped in try/except: a provider outage can no longer fail a paid order.
+- `PUBLIC_APP_URL` added to backend/.env.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
