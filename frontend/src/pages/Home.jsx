@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ShieldCheck, Zap, Lock } from "lucide-react";
-import { api, CATEGORY_LABELS } from "@/lib/api";
+import { api } from "@/lib/api";
 import { ProductCard } from "@/components/ProductCard";
 import { useCart } from "@/context/CartContext";
 
@@ -10,13 +10,7 @@ const HERO = "/images/snorlax.jpg";
 const GENGAR = "/images/Mainpage.jpg";
 const PSYDUCK = "/images/psyduck.jpg";
 
-const SECTIONS = [
-  { key: "pokecoin_bundle", note: "Required for passes", noteClass: "text-zinc-600" },
-  { key: "event_pass", note: "Bundle required", noteClass: "text-[#f4d03f]" },
-  { key: "medals", note: "Standalone or bundled", noteClass: "text-[#c7a6f0]" },
-  { key: "stardust", note: "Farmed by operators", noteClass: "text-zinc-600" },
-  { key: "shundo_service", note: "Operator fleet", noteClass: "text-[#c7a6f0]" },
-];
+const ORDER = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"];
 
 export default function Home() {
   const [products, setProducts] = useState([]);
@@ -26,8 +20,9 @@ export default function Home() {
     api.get("/products").then(({ data }) => setProducts(data)).catch(() => {});
   }, []);
 
-  const featured = products.filter((p) => p.is_featured);
-  const byCat = (c) => featured.filter((p) => p.category === c);
+  const featured = products
+    .filter((p) => p.is_featured)
+    .sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
   const hasAnyFeatured = featured.length > 0;
 
   return (
@@ -104,27 +99,26 @@ export default function Home() {
         </div>
       </section>
 
-      {/* FEATURED STORE — only starred products, empty categories hidden */}
+      {/* FEATURED STORE — one flat grid, no per-category sections */}
       <section id="store" className="mx-auto max-w-[1400px] px-5 py-20 lg:px-10 lg:py-28">
-        {SECTIONS.map(({ key, note, noteClass }) => {
-          const items = byCat(key);
-          if (items.length === 0) return null;
-          return (
-            <div key={key} data-testid={`home-section-${key}`} className="mb-24 last:mb-0">
-              <div className="mb-12 flex items-end justify-between gap-6 border-b border-[#1f1f1f] pb-6">
-                <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-                  {CATEGORY_LABELS[key]}
-                </h2>
-                <span className={`text-[10px] uppercase tracking-[0.25em] ${noteClass}`}>{note}</span>
-              </div>
-              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-                {items.map((p) => (
-                  <ProductCard key={p.id} product={p} featured={key === "event_pass"} />
-                ))}
-              </div>
+        {hasAnyFeatured && (
+          <>
+            <div className="mb-12 flex flex-wrap items-end justify-between gap-4 border-b border-[#1f1f1f] pb-6">
+              <h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">Featured Stock</h2>
+              <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">
+                Event passes require a bundle
+              </span>
             </div>
-          );
-        })}
+            <div
+              data-testid="home-featured-grid"
+              className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            >
+              {featured.map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))}
+            </div>
+          </>
+        )}
 
         {!hasAnyFeatured && (
           <p data-testid="home-no-featured" className="text-xs text-zinc-600">
