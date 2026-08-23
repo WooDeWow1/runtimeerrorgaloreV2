@@ -1,0 +1,62 @@
+{
+  "summary": "Iteration 14 full verification of the SellAuth commercial-launch reconfiguration (backend + frontend). New suite /app/backend/tests/test_sellauth_launch_v6.py = 26/26 passed (catalog id mapping, SellAuth-synced prices, all cart-rule cases, coupon passthrough, removed coupon endpoints, banner auth/validation/persistence, regressions). Full backend suite after test maintenance: 141 passed / 23 skipped / 0 failed. Verified against SellAuth for real: a catalog checkout produced invoice 15230222 with productId 851931 / variantId 1508699 at SellAuth's own price $25.00 (status 'created', LEFT UNPAID); a typed coupon reaches SellAuth and its rejection ('The coupon code is invalid.') is surfaced verbatim in the UI, proving passthrough with no local coupon engine (/api/coupons/validate and /api/admin/coupons are 404). Webhook regression: bad signature 401, good 200 -> order created with sellauth ids, replay deduped; confirmation email rendered 5 https://pokecoins.cc links and delivered (id a0966fff...). Browser: /products lists the 3 PokeCoins first, Event Pass cards show locked-notice + 'Locked' before any companion, unlock after adding 1M Stardust (not just coins), re-lock once a pass is in the cart, cart stepper caps a pass at qty 1, CartDrawer + Checkout show the validation error and disable checkout for a pass-alone cart, banner renders on home/products/checkout/my-orders/admin/payment-success, dismiss persists across navigation, enabled=false hides it everywhere, and admin banner-form save propagated to the public banner. /payment/success on a seeded paid session flipped to 'Payment confirmed' within ~2s and unlocked order-chat + claim-account-card. ONE LAUNCH BLOCKER FOUND: /checkout crashed with 'payable is not defined' (blank page) for every user until I applied the one-token test-unblocking fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/orders/checkout + POST /api/webhooks/sellauth", "issue": "Order total/subtotal are written from OUR list prices and discount is hardcoded 0.0, but SellAuth is now authoritative for price and coupons. If a buyer uses a real SellAuth coupon (or SellAuth prices drift from ours), the stored order total and the 'Total paid: $X' line in the confirmation email are wrong. The webhook should reconcile the paid invoice total (sellauth.get_invoice) back onto the order before emailing."},
+      {"endpoint": "CORS middleware (server.py:828)", "issue": "allow_origin_regex='.*' together with allow_credentials=True and httpOnly cookies set with SameSite=None means any website can issue credentialed requests to the API (CSRF surface on admin endpoints). Playbook expects explicit origins."},
+      {"endpoint": "models.py", "issue": "Dead code after the coupon engine removal: Coupon, CouponIn and CouponValidateRequest models are still defined (CouponValidateRequest even forward-references CartItemIn). Delete them so nobody wires them back in."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Checkout.jsx (line 147)", "issue": "LAUNCH BLOCKER (reproduced then unblocked by me): the pay button rendered `Pay ${money(payable)}` but `payable` is defined nowhere in the file -> ReferenceError 'payable is not defined' on mount, so /checkout rendered a completely blank page (dev overlay in preview, white screen in prod). Nobody could check out. I changed it to money(total) to continue testing - PLEASE CONFIRM that the intended amount is the cart total (SellAuth applies the coupon on its own page) and keep a lint/CI gate (no-undef) so this class of crash cannot ship again.", "selector": "[data-testid=\"place-order-btn\"]", "priority": "CRITICAL"},
+      {"component": "ProductCard.jsx", "issue": "A locked Event Pass 'Locked' button has no disabled/aria-disabled attribute - it is fully clickable and only blocked inside add() with a toast. Spec asked for a disabled add. Screen-reader/keyboard users get no hint that it is inert.", "selector": "[data-testid=\"add-to-cart-{id}\"]", "priority": "LOW"},
+      {"component": "Admin.jsx > Settings & Analytics", "issue": "The banner form renders with empty inputs and then GET /settings/banner overwrites local state on arrival (and re-fires on every switch back to the settings tab). Reproduced: text typed before the fetch resolved was silently reverted to the server value while the link-label typed after it saved - the admin saved a half-edited banner. Add a loading state / only hydrate once when the form is untouched.", "selector": "[data-testid=\"banner-form\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "PaymentSuccess polling", "issue": "The 2s poll is correct, but ANY failed request (transient 5xx/network blip) sets state='pending' and stops polling forever - a paying customer can land on 'Payment still settling' even though the webhook confirms seconds later. Retry a few times before giving up and show an error state.", "affected_selectors": ["[data-testid=\"payment-pending-note\"]"]},
+      {"flow": "Announcement banner refresh", "issue": "AnnouncementBanner fetches only on mount, so a banner change needs a full reload (the admin toast even says 'reload any page to see it'), and the internal link is a raw <a href='/products'> which forces a full page reload instead of SPA navigation. Use <Link> for internal paths.", "affected_selectors": ["[data-testid=\"announcement-banner\"]", "[data-testid=\"banner-link\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Admin > Products", "issues": ["The featured toggle is an icon-only star with no text/aria-label, so its state is not announced and is unreadable to automation (state had to be verified through the API)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sellauth_launch_v6.py",
+    "/app/test_reports/pytest/it14_launch.xml",
+    "/app/test_reports/pytest/it14_all.xml",
+    "/app/scripts/qa_it14_invoice_check.py",
+    "/app/scripts/qa_it14_email_check.py",
+    "/app/scripts/qa_it14_cleanup.py"
+  ],
+  "action_items": [
+    "CONFIRM the Checkout.jsx pay-button amount (I replaced the undefined `payable` with `total`) and add an eslint no-undef/CI gate - this bug made /checkout a blank page for every visitor.",
+    "Reconcile the SellAuth invoice total (and any SellAuth coupon discount) back onto the order in the webhook so order totals and the confirmation email are not our list prices.",
+    "Lock CORS down to explicit origins (credentials + SameSite=None cookies with allow_origin_regex='.*' is a CSRF surface).",
+    "Make the admin banner form hydrate once / show a loading state so typed edits are not overwritten by the GET.",
+    "Let PaymentSuccess retry after a failed poll instead of dropping straight to the 'pending' end state.",
+    "Delete the leftover Coupon/CouponIn/CouponValidateRequest models; use <Link> for the internal banner link."
+  ],
+  "critical_code_review_comments": [
+    "Checkout.jsx referenced an undeclared identifier in JSX - only reachable at render time, so nothing caught it. Any file touching money should be lint-gated.",
+    "server.py checkout(): 'subtotal' is computed from our prices purely for bookkeeping while SellAuth prices/coupons decide the real charge; either stop storing a total we do not own or reconcile it on the webhook.",
+    "server.py is 939 lines and still mixes auth, orders, messaging, banner settings and analytics - split by domain routers.",
+    "Product create/update/delete endpoints are still live (admin-only) even though the Products tab is display-only; that is fine, but the Coming Soon toggle uses the generic PUT /products/{id}, so a future field added to ProductUpdate is one typo away from being mass-edited from the UI. Consider a dedicated PATCH /products/{id}/coming-soon like the featured toggle.",
+    "AnnouncementBanner has no error state; a failed GET silently hides the banner site-wide."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Checkout.jsx (unblocking fix: money(payable) -> money(total))",
+    "/app/backend/tests/test_sellauth_launch_v6.py (new, 26 tests)",
+    "/app/backend/tests/backend_test.py (test-only: 4 obsolete local-coupon-engine classes marked skip; TestMedalsCartLogic/TestStardustCart 'pass needs a coin bundle' tests rewritten to the iteration-14 rule that Stardust and Medals also unlock a pass)",
+    "/app/backend/tests/test_coupons_v2.py (deleted - tested the removed coupon engine)",
+    "/app/scripts/qa_it14_invoice_check.py, /app/scripts/qa_it14_email_check.py, /app/scripts/qa_it14_cleanup.py (new QA helpers)"
+  ],
+  "success_rate": {"backend": "100% (141 passed, 23 skipped, 0 failed; new launch suite 26/26)", "frontend": "95% - every launch flow verified, but /checkout was 100% broken until the `payable` crash was patched"},
+  "seed_data_creation": "One paid guest order/session via /app/scripts/seed_ui_test_order.py (uitest+9a4237@gmail.com) and one guest checkout session promoted through the simulated webhook (qa-it14-ui@gmail.com). Both orders, all qa-it14/uitest sessions, waitlist rows and users deleted via /app/scripts/qa_it14_cleanup.py - verified 0 remaining, catalog still 13 products with flags restored (1M Stardust featured=false, coming_soon=false). SellAuth invoices created by tests (incl. 15230222) were left UNPAID as instructed. Banner left as the developer set it ('Welcome! - Use Code \"GOFEST\"...').",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md); bcrypt hash verified as $2b$12$, httpOnly+Secure+SameSite=None cookies confirmed on login, auth playbook suite 11/11 (previous lockout-keying failures no longer reproduce).",
+  "context_for_next_testing_agent": "Run the launch suite with `pytest tests/test_sellauth_launch_v6.py`; it creates 3 REAL SellAuth invoices (pass+stardust, pass+medal, coins) - leave them unpaid and run `python3 /app/scripts/qa_it14_cleanup.py` afterwards (the module teardown already deletes the sessions). test_coming_soon_v3.py still needs -n 0. Product ids used in UI scripts: 1M Stardust 6a84f9a46717523cea50b635, Weekly Event Ticket 6a8312ba14a920d4c51b5e63, 5,600 Pokecoins 6a82c7a06448ed8a06f8bbf1. Login testids are login-email / login-password / login-submit (NOT *-input). A bogus coupon at checkout legitimately returns 400 with SellAuth's message 'The coupon code is invalid.' - that is passthrough working, not a bug. Emails only send to delivered@resend.dev; anything else returns 422 undeliverable_recipient.",
+  "rca_of_the_issue": "Checkout crash: pages/Checkout.jsx line 147 interpolated `money(payable)` while the component only defines `total` (from useCart) - a leftover identifier from the removed local discount engine. Because it is evaluated during render, the whole Checkout tree threw ReferenceError and React unmounted it, producing a blank /checkout for every user (verified in the browser: 'PAGEERROR: payable is not defined', checkout-page node count 0). Replacing it with `total` restored the page and the full guest flow then worked end to end (sync popup to https://pokecoinss.mysellauth.com/checkout/..., session stored, redirect to /payment/success). Banner half-save: Admin.jsx re-runs api.get('/settings/banner') in a useEffect keyed on the active tab and unconditionally setBanner(data), so any edit made before the response lands is overwritten."
+}

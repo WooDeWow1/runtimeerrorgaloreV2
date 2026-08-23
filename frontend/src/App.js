@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { Navbar } from "@/components/Navbar";
+import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { CartDrawer } from "@/components/CartDrawer";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useVisitTracker } from "@/hooks/useVisitTracker";
@@ -26,6 +27,7 @@ function App() {
       <BrowserRouter>
         <AuthProvider>
           <CartProvider>
+            <AnnouncementBanner />
             <Navbar />
             <CartDrawer />
             <Routes>

@@ -60,11 +60,11 @@ export default function PaymentSuccess() {
         setState("pending");
         return;
       }
-      if (attempts >= 15) {
+      if (attempts >= 60) {
         setState("pending");
         return;
       }
-      timer = setTimeout(poll, 3000);
+      timer = setTimeout(poll, 2000);
     };
     poll();
     return () => clearTimeout(timer);

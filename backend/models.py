@@ -70,6 +70,8 @@ class ProductIn(BaseModel):
     active: bool = True
     coming_soon: bool = False
     is_featured: bool = False
+    sellauth_product_id: Optional[int] = None
+    sellauth_variant_id: Optional[int] = None
 
 
 class ProductUpdate(BaseModel):
@@ -84,6 +86,8 @@ class ProductUpdate(BaseModel):
     active: Optional[bool] = None
     coming_soon: Optional[bool] = None
     is_featured: Optional[bool] = None
+    sellauth_product_id: Optional[int] = None
+    sellauth_variant_id: Optional[int] = None
 
 
 class Product(BaseDocument):
@@ -98,7 +102,16 @@ class Product(BaseDocument):
     active: bool = True
     coming_soon: bool = False
     is_featured: bool = False
+    sellauth_product_id: Optional[int] = None
+    sellauth_variant_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class BannerSettings(BaseModel):
+    enabled: bool = False
+    text: str = ""
+    link_url: str = ""
+    link_label: str = ""
 
 
 # ---------- Orders ----------
@@ -113,6 +126,8 @@ class OrderItem(BaseModel):
     category: str
     price: float
     quantity: int
+    sellauth_product_id: Optional[int] = None
+    sellauth_variant_id: Optional[int] = None
 
 
 class CheckoutRequest(BaseModel):

@@ -459,8 +459,8 @@ class TestMedalsCategory:
 
 # ---------------- Medals cart logic ----------------
 class TestMedalsCartLogic:
-    def test_medals_only_does_not_unlock_event_pass(self, customer):
-        """Cart with medals + event_pass but no bundle => 400."""
+    def test_medals_unlock_event_pass(self, customer):
+        """Iteration 14 rule: a Medal bundle is a valid companion for an Event Pass."""
         medal = _find("medals")
         ep = _find("event_pass")
         assert medal and ep
@@ -471,8 +471,9 @@ class TestMedalsCartLogic:
             ],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
         })
-        assert r.status_code == 400
-        assert "Pok" in r.json()["detail"]
+        assert r.status_code in (200, 502, 503), f"got {r.status_code}: {r.text}"
+        if r.status_code == 200:
+            db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
 
     def test_medals_only_passes_validation(self, customer):
         """Medals-only checkout passes cart validation and now returns a real SellAuth URL."""
@@ -571,7 +572,8 @@ class TestStardustCart:
             assert r.json().get("checkout_url", "").startswith("http")
             db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
 
-    def test_stardust_does_not_unlock_event_pass(self, customer):
+    def test_stardust_unlocks_event_pass(self, customer):
+        """Iteration 14 rule: Stardust is a valid companion for an Event Pass."""
         stardust = _find("stardust")
         ep = _find("event_pass")
         r = requests.post(f"{API}/orders/checkout", headers=auth(customer["token"]), json={
@@ -581,8 +583,9 @@ class TestStardustCart:
             ],
             "ptc_username": "u", "ptc_password": "p", "origin_url": BASE_URL,
         })
-        assert r.status_code == 400
-        assert "Pok" in r.json()["detail"]
+        assert r.status_code in (200, 502, 503), f"got {r.status_code}: {r.text}"
+        if r.status_code == 200:
+            db.checkout_sessions.delete_one({"_id": ObjectId(r.json()["session_id"])})
 
 
 # ---------------- Password change ----------------
@@ -845,6 +848,7 @@ def _coupon_payload(code=None, **overrides):
     return payload
 
 
+@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponAdminCrud:
     def test_list_requires_admin(self, customer):
         assert requests.get(f"{API}/admin/coupons").status_code == 401
@@ -931,6 +935,7 @@ class TestCouponAdminCrud:
 
 
 # ---------------- Coupon validation endpoint (iteration 8) ----------------
+@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponValidation:
     @pytest.fixture
     def coupon_20(self, admin_token):
@@ -1038,6 +1043,7 @@ class TestCouponValidation:
 
 
 # ---------------- Coupon exclusions (iteration 8) ----------------
+@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponExclusions:
     def test_category_exclusion_all_excluded_400(self, admin_token):
         code = f"CATX{uuid.uuid4().hex[:5].upper()}"
@@ -1128,6 +1134,7 @@ class TestCouponExclusions:
 
 
 # ---------------- Coupon at checkout (iteration 8) ----------------
+@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponCheckout:
     def test_checkout_applies_discount_server_side_and_stores_on_session(self, admin_token, customer):
         code = f"CO{uuid.uuid4().hex[:5].upper()}"

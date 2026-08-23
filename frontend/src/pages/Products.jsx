@@ -12,6 +12,8 @@ const TABS = [
   { key: "shundo_service", label: "Shundo Hunting (Waitlist)" },
 ];
 
+const CATEGORY_ORDER = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"];
+
 export default function Products() {
   const [products, setProducts] = useState([]);
   const [tab, setTab] = useState("all");
@@ -20,10 +22,13 @@ export default function Products() {
     api.get("/products").then(({ data }) => setProducts(data)).catch(() => {});
   }, []);
 
-  const visible = useMemo(
-    () => (tab === "all" ? products : products.filter((p) => p.category === tab)),
-    [products, tab]
-  );
+  const visible = useMemo(() => {
+    const list = tab === "all" ? products : products.filter((p) => p.category === tab);
+    // PokéCoins always lead the default view.
+    return [...list].sort(
+      (a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category)
+    );
+  }, [products, tab]);
 
   return (
     <div data-testid="products-page" className="mx-auto max-w-[1400px] px-5 py-16 lg:px-10 lg:py-24">

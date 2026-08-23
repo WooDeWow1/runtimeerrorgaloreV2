@@ -22,13 +22,11 @@ from pymongo.errors import DuplicateKeyError  # noqa: E402
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
 
 from models import (  # noqa: E402
+    BannerSettings,
     CATEGORIES,
     ORDER_STATUSES,
     CheckoutRequest,
     ClaimOrderRequest,
-    Coupon,
-    CouponIn,
-    CouponValidateRequest,
     FeaturedUpdate,
     LoginRequest,
     Message,
@@ -55,6 +53,7 @@ from security import (  # noqa: E402
     hash_password,
     verify_password,
 )
+import catalog_sync  # noqa: E402
 import sellauth  # noqa: E402
 from emailer import order_tracking_html, order_url, send_email, support_reply_html  # noqa: E402
 
@@ -330,7 +329,6 @@ async def delete_product(product_id: str, admin: dict = Depends(get_admin_user))
     return {"ok": True}
 
 
-# ---------------- Coupons ----------------
 async def resolve_items(entries) -> List[OrderItem]:
     items: List[OrderItem] = []
     for entry in entries:
@@ -342,151 +340,28 @@ async def resolve_items(entries) -> List[OrderItem]:
         items.append(OrderItem(
             product_id=str(doc["_id"]), name=doc["name"], category=doc["category"],
             price=float(doc["price"]), quantity=entry.quantity,
+            sellauth_product_id=doc.get("sellauth_product_id"),
+            sellauth_variant_id=doc.get("sellauth_variant_id"),
         ))
     return items
 
 
-async def apply_coupon(
-    code: Optional[str], items: List[OrderItem], email: Optional[str] = None
-) -> dict:
-    """Returns pricing breakdown. Raises 400 with a human message if the code cannot be used."""
-    subtotal = round(sum(i.price * i.quantity for i in items), 2)
-    result = {
-        "subtotal": subtotal, "discount": 0.0, "total": subtotal,
-        "coupon_code": None, "percent_off": None, "amount_off": None,
-        "discount_type": None, "discount_label": None,
-        "eligible_subtotal": subtotal, "excluded_items": [],
-    }
-    if not code:
-        return result
-
-    coupon = await db.coupons.find_one({"code": code.strip().upper()})
-    if not coupon or not coupon.get("active", True):
-        raise HTTPException(status_code=400, detail="That coupon code is not valid.")
-    expires = coupon.get("expires_at")
-    if expires and expires.replace(tzinfo=timezone.utc) < utc_now():
-        raise HTTPException(status_code=400, detail="That coupon has expired.")
-    if coupon.get("max_uses") and coupon.get("used_count", 0) >= coupon["max_uses"]:
-        raise HTTPException(status_code=400, detail="That coupon has reached its usage limit.")
-    if coupon.get("min_subtotal") and subtotal < coupon["min_subtotal"]:
+def assert_cart_rules(items: List[OrderItem]) -> None:
+    """Event Passes ride along with another product: never alone, never more than one."""
+    passes = sum(i.quantity for i in items if i.category == "event_pass")
+    others = [i for i in items if i.category != "event_pass"]
+    if passes and not others:
         raise HTTPException(
             status_code=400,
-            detail=f"Spend at least ${coupon['min_subtotal']:.2f} to use this coupon.",
+            detail="An Event Pass cannot be bought on its own — add Pokécoins, Stardust or a "
+                   "Medal bundle to your cart.",
         )
-    if coupon.get("one_per_customer") and email:
-        used = await db.coupon_redemptions.find_one(
-            {"code": coupon["code"], "email": email.strip().lower()}
-        )
-        if used:
-            raise HTTPException(
-                status_code=400,
-                detail="You've already used this code — it is limited to one per customer.",
-            )
-
-    excluded_ids = set(coupon.get("excluded_product_ids") or [])
-    excluded_cats = set(coupon.get("excluded_categories") or [])
-    eligible, excluded_names = [], []
-    for i in items:
-        if i.product_id in excluded_ids or i.category in excluded_cats:
-            excluded_names.append(i.name)
-        else:
-            eligible.append(i)
-    if not eligible:
+    if passes > 1:
         raise HTTPException(
-            status_code=400, detail="This coupon does not apply to any item in your cart."
+            status_code=400, detail="Only one Event Pass per order. Please check out separately."
         )
 
-    eligible_subtotal = round(sum(i.price * i.quantity for i in eligible), 2)
-    if coupon.get("discount_type", "percent") == "fixed":
-        amount = float(coupon.get("amount_off") or 0)
-        # Cap the discount so the cart still has a chargeable total for the payment provider.
-        max_discount = max(round(subtotal - MIN_CHARGE, 2), 0)
-        discount = round(min(amount, eligible_subtotal, max_discount), 2)
-        if discount <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"This cart is too small for that code — spend at least ${MIN_CHARGE + 0.01:.2f}.",
-            )
-        label = f"${discount:.2f} off"
-    else:
-        discount = round(eligible_subtotal * coupon["percent_off"] / 100, 2)
-        label = f"{coupon['percent_off']:g}% off"
-    result.update({
-        "discount": discount,
-        "total": round(subtotal - discount, 2),
-        "coupon_code": coupon["code"],
-        "percent_off": coupon.get("percent_off"),
-        "amount_off": coupon.get("amount_off"),
-        "discount_type": coupon.get("discount_type", "percent"),
-        "discount_label": label,
-        "one_per_customer": bool(coupon.get("one_per_customer")),
-        "eligible_subtotal": eligible_subtotal,
-        "excluded_items": excluded_names,
-    })
-    return result
 
-
-@api.post("/coupons/validate")
-async def validate_coupon(payload: CouponValidateRequest):
-    items = await resolve_items(payload.items)
-    return await apply_coupon(payload.code, items, payload.email)
-
-
-def validate_coupon_payload(payload: CouponIn):
-    if payload.discount_type == "fixed":
-        if not payload.amount_off:
-            raise HTTPException(status_code=400, detail="Fixed coupons need a dollar amount off.")
-    elif not payload.percent_off:
-        raise HTTPException(status_code=400, detail="Percentage coupons need a percent off.")
-
-
-@api.get("/admin/coupons")
-async def list_coupons(admin: dict = Depends(get_admin_user)):
-    docs = await db.coupons.find().sort("created_at", -1).to_list(200)
-    return [Coupon.from_mongo(d).model_dump(by_alias=False) for d in docs]
-
-
-@api.post("/admin/coupons")
-async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)):
-    validate_coupon_payload(payload)
-    for cat in payload.excluded_categories:
-        if cat not in CATEGORIES:
-            raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
-    coupon = Coupon(**{**payload.model_dump(), "code": payload.code.strip().upper()})
-    try:
-        result = await db.coupons.insert_one(coupon.to_mongo())
-    except DuplicateKeyError:
-        raise HTTPException(status_code=400, detail="That coupon code already exists")
-    doc = await db.coupons.find_one({"_id": result.inserted_id})
-    return Coupon.from_mongo(doc).model_dump(by_alias=False)
-
-
-@api.put("/admin/coupons/{coupon_id}")
-async def update_coupon(coupon_id: str, payload: CouponIn, admin: dict = Depends(get_admin_user)):
-    validate_coupon_payload(payload)
-    for cat in payload.excluded_categories:
-        if cat not in CATEGORIES:
-            raise HTTPException(status_code=400, detail=f"Unknown category: {cat}")
-    updates = {**payload.model_dump(), "code": payload.code.strip().upper()}
-    try:
-        result = await db.coupons.update_one({"_id": oid(coupon_id)}, {"$set": updates})
-    except DuplicateKeyError:
-        raise HTTPException(status_code=400, detail="That coupon code already exists")
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Coupon not found")
-    doc = await db.coupons.find_one({"_id": oid(coupon_id)})
-    return Coupon.from_mongo(doc).model_dump(by_alias=False)
-
-
-@api.delete("/admin/coupons/{coupon_id}")
-async def delete_coupon(coupon_id: str, admin: dict = Depends(get_admin_user)):
-    result = await db.coupons.delete_one({"_id": oid(coupon_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Coupon not found")
-    return {"ok": True}
-
-
-# ---------------- Orders ----------------
 def order_response(doc: dict, include_credentials: bool = False) -> dict:
     order = Order.from_mongo(doc)
     data = order.model_dump(by_alias=False)
@@ -511,30 +386,24 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     if not payload.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
     items = await resolve_items(payload.items)
-
-    has_pass = any(i.category == "event_pass" for i in items)
-    has_coins = any(i.category == "pokecoin_bundle" for i in items)
-    if has_pass and not has_coins:
-        raise HTTPException(
-            status_code=400,
-            detail="An Event Pass requires at least one Pokécoin Bundle in your cart.",
-        )
+    assert_cart_rules(items)
 
     user_id = str(user["_id"]) if user else ""
     email = (user["email"] if user else (payload.email or "")).lower()
     if not email:
         raise HTTPException(status_code=400, detail="An email address is required for guest checkout")
 
-    pricing = await apply_coupon(payload.coupon_code, items, email)
-    total = pricing["total"]
+    # SellAuth owns pricing and coupons now: we record our list prices and pass the code through.
+    subtotal = round(sum(i.price * i.quantity for i in items), 2)
+    coupon_code = (payload.coupon_code or "").strip().upper() or None
 
     # Nothing is written to `orders` yet: a spam-resistant temporary session with a 30 min TTL.
     session_doc = {
         "items": [i.model_dump() for i in items],
-        "total": total,
-        "subtotal": pricing["subtotal"],
-        "discount": pricing["discount"],
-        "coupon_code": pricing["coupon_code"],
+        "total": subtotal,
+        "subtotal": subtotal,
+        "discount": 0.0,
+        "coupon_code": coupon_code,
         "user_id": user_id,
         "email": email,
         "origin_url": payload.origin_url.rstrip("/"),
@@ -547,27 +416,10 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     result = await db.checkout_sessions.insert_one(session_doc)
     session_id = str(result.inserted_id)
 
-    # SellAuth is charged the discounted amounts; the order keeps original prices + discount metadata.
-    charge_items = [i.model_dump() for i in items]
-    if pricing["discount"] > 0:
-        factor = max(
-            (pricing["eligible_subtotal"] - pricing["discount"]) / pricing["eligible_subtotal"], 0
-        )
-        excluded = set(pricing["excluded_items"])
-        eligible_idx = [n for n, e in enumerate(charge_items) if e["name"] not in excluded]
-        for n in eligible_idx:
-            charge_items[n]["price"] = round(charge_items[n]["price"] * factor, 2)
-        # Absorb per-line rounding drift into the last eligible line so the charge matches `total`.
-        charged = round(sum(e["price"] * e["quantity"] for e in charge_items), 2)
-        drift = round(total - charged, 2)
-        if drift and eligible_idx:
-            last = charge_items[eligible_idx[-1]]
-            adjusted = round(last["price"] + drift / last["quantity"], 2)
-            last["price"] = max(adjusted, 0.01)
-
     try:
         checkout_data = await sellauth.create_checkout(
-            items=charge_items, email=email, session_id=session_id
+            items=[i.model_dump() for i in items], email=email, session_id=session_id,
+            coupon=coupon_code,
         )
     except sellauth.SellAuthPlanError as exc:
         await db.checkout_sessions.delete_one({"_id": result.inserted_id})
@@ -609,13 +461,6 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     )
     result = await db.orders.insert_one(order.to_mongo())
     order_id = str(result.inserted_id)
-    if session.get("coupon_code"):
-        await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
-        await db.coupon_redemptions.update_one(
-            {"code": session["coupon_code"], "email": session["email"].lower()},
-            {"$set": {"order_id": order_id, "redeemed_at": utc_now()}},
-            upsert=True,
-        )
     await db.checkout_sessions.update_one(
         {"_id": session["_id"]}, {"$set": {"status": "paid", "order_id": order_id}}
     )
@@ -847,6 +692,46 @@ async def mark_notifications_read(user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+@api.get("/settings/banner")
+async def get_banner():
+    doc = await db.settings.find_one({"_id": "banner"})
+    if not doc:
+        return BannerSettings().model_dump()
+    return BannerSettings(**{k: v for k, v in doc.items() if k != "_id"}).model_dump()
+
+
+@api.put("/admin/settings/banner")
+async def update_banner(payload: BannerSettings, admin: dict = Depends(get_admin_user)):
+    if payload.link_url and not payload.link_url.startswith(("https://", "/")):
+        raise HTTPException(status_code=400, detail="Banner link must be an https:// or / path URL")
+    await db.settings.update_one(
+        {"_id": "banner"}, {"$set": {**payload.model_dump(), "updated_at": utc_now()}}, upsert=True
+    )
+    return payload.model_dump()
+
+
+# ---------------- Catalog sync (preview -> production) ----------------
+async def _sync_catalog(apply: bool) -> dict:
+    docs = await db.products.find().sort("name", 1).to_list(500)
+    source = [Product.from_mongo(d).model_dump(by_alias=False) for d in docs]
+    try:
+        return await catalog_sync.plan(source, apply=apply)
+    except catalog_sync.SyncError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach production: {exc}")
+
+
+@api.get("/admin/sync/catalog")
+async def sync_catalog_preview(admin: dict = Depends(get_admin_user)):
+    return await _sync_catalog(apply=False)
+
+
+@api.post("/admin/sync/catalog")
+async def sync_catalog_apply(admin: dict = Depends(get_admin_user)):
+    return await _sync_catalog(apply=True)
+
+
 # ---------------- Visitor analytics (lightweight) ----------------
 def client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
@@ -1038,8 +923,6 @@ INDEXES = [
     ("visits", "expires_at", {"expireAfterSeconds": 0}),
     ("visits", [("ip", 1), ("day", 1)], {"unique": True}),
     ("webhook_events", "event_key", {"unique": True}),
-    ("coupons", "code", {"unique": True}),
-    ("coupon_redemptions", [("code", 1), ("email", 1)], {"unique": True}),
 ]
 
 

@@ -29,17 +29,28 @@ class SellAuthPlanError(SellAuthError):
     pass
 
 
-async def create_checkout(*, items: list[dict], email: str, session_id: str) -> dict:
-    """Create a SellAuth hosted checkout for custom-priced cart items."""
+async def create_checkout(*, items: list[dict], email: str, session_id: str,
+                          coupon: Optional[str] = None) -> dict:
+    """Create a SellAuth hosted checkout. Catalog items use the shop's product/variant ids so
+    SellAuth owns pricing, stock and coupons; anything unmapped falls back to a custom line."""
+    cart = []
+    for i in items:
+        if i.get("sellauth_product_id") and i.get("sellauth_variant_id"):
+            cart.append({
+                "productId": int(i["sellauth_product_id"]),
+                "variantId": int(i["sellauth_variant_id"]),
+                "quantity": i["quantity"],
+            })
+        else:
+            cart.append({"name": i["name"], "price": f"{i['price']:.2f}", "quantity": i["quantity"]})
     payload: dict[str, Any] = {
-        "cart": [
-            {"name": i["name"], "price": f"{i['price']:.2f}", "quantity": i["quantity"]}
-            for i in items
-        ],
+        "cart": cart,
         "email": email,
         "currency": "USD",
         "metadata": {"checkout_session_id": session_id},
     }
+    if coupon:
+        payload["coupon"] = coupon.strip()
     async with httpx.AsyncClient(timeout=25) as client:
         resp = await client.post(
             f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload

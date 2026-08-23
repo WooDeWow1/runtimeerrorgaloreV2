@@ -76,7 +76,8 @@ export const CartDrawer = () => {
             >
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
-                Event Passes cannot be purchased alone. Add at least one Pokécoin Bundle to unlock checkout.
+                Event Passes cannot be purchased alone. Add Pokécoins, Stardust or a Medal bundle to
+                unlock checkout.
               </span>
             </div>
           )}

@@ -7,10 +7,11 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 
 export const ProductCard = ({ product, featured = false }) => {
-  const { add, hasCoins } = useCart();
+  const { add, hasOther, passCount } = useCart();
   const { user } = useAuth();
   const comingSoon = !!product.coming_soon;
-  const locked = !comingSoon && product.category === "event_pass" && !hasCoins;
+  const locked =
+    !comingSoon && product.category === "event_pass" && (!hasOther || passCount >= 1);
   const [joining, setJoining] = useState(false);
 
   const joinWaitlist = async () => {
@@ -84,7 +85,7 @@ export const ProductCard = ({ product, featured = false }) => {
             data-testid={`requires-bundle-badge-${product.id}`}
             className="mt-4 self-start border border-[#f4d03f]/50 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-[#f4d03f]"
           >
-            Requires Coin Bundle
+            Add-on only · 1 per order
           </span>
         )}
         {product.category === "medals" && (
@@ -110,7 +111,8 @@ export const ProductCard = ({ product, featured = false }) => {
             data-testid={`locked-notice-${product.id}`}
             className="mt-4 border border-[#f4d03f]/50 bg-[#f4d03f]/10 p-3 text-[10px] leading-relaxed text-[#f4d03f]"
           >
-            Locked — add a Pokécoin Bundle to your cart to unlock this Event Pass.
+            Locked — add Pokécoins, Stardust or a Medal bundle to your cart to unlock this Event
+            Pass. One pass per order.
           </p>
         )}
 
@@ -144,7 +146,7 @@ export const ProductCard = ({ product, featured = false }) => {
             <button
               data-testid={`add-to-cart-${product.id}`}
               onClick={() => add(product)}
-              title={locked ? "Requires a Pokécoin Bundle" : "Add to cart"}
+              title={locked ? "Add another product first — one pass per order" : "Add to cart"}
               className="flex items-center gap-2 border border-zinc-700 px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-zinc-300 transition-colors hover:border-[#00ffcc] hover:text-[#00ffcc]"
             >
               {locked ? <Lock className="h-3 w-3" /> : <Plus className="h-3 w-3" />}

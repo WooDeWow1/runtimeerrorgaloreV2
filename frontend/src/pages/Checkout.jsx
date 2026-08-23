@@ -16,77 +16,37 @@ export default function Checkout() {
   const { user } = useAuth();
   const isGuest = !user;
   const [email, setEmail] = useState("");
-  const onEmailChange = (e) => {
-    setEmail(e.target.value);
-    if (applied?.one_per_customer) {
-      setApplied(null);
-      setCoupon("");
-      setCouponError("Re-apply your discount code after changing your email.");
-    }
-  };
+  const onEmailChange = (e) => setEmail(e.target.value);
   const [ptcUsername, setPtcUsername] = useState("");
   const [ptcPassword, setPtcPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [coupon, setCoupon] = useState("");
-  const [applied, setApplied] = useState(null);
-  const [couponBusy, setCouponBusy] = useState(false);
-  const [couponError, setCouponError] = useState("");
 
   const cartPayload = items.map((i) => ({ product_id: i.id, quantity: i.quantity }));
-  const payable = applied ? applied.total : total;
-
-  const applyCoupon = async () => {
-    if (!coupon.trim()) return;
-    setCouponBusy(true);
-    setCouponError("");
-    try {
-      const { data } = await api.post("/coupons/validate", {
-        code: coupon.trim(),
-        items: cartPayload,
-        email: (user?.email || email || "").trim() || null,
-      });
-      setApplied(data);
-      toast.success(`${data.coupon_code} applied — ${data.discount_label}`, {
-        description:
-          data.excluded_items.length > 0
-            ? `Not valid on: ${data.excluded_items.join(", ")}`
-            : undefined,
-      });
-    } catch (err) {
-      setApplied(null);
-      setCouponError(apiError(err));
-    } finally {
-      setCouponBusy(false);
-    }
-  };
-
-  const removeCoupon = () => {
-    setApplied(null);
-    setCoupon("");
-    setCouponError("");
-  };
 
   const submit = async (e) => {
     e.preventDefault();
     setError("");
     setBusy(true);
+    // Opened synchronously inside the click so popup blockers allow it; URL is set once we have it.
+    const payWindow = window.open("", "_blank");
     try {
       const { data } = await api.post("/orders/checkout", {
         items: cartPayload,
         ptc_username: ptcUsername,
         ptc_password: ptcPassword,
         origin_url: window.location.origin,
-        ...(applied ? { coupon_code: applied.coupon_code } : {}),
+        ...(coupon.trim() ? { coupon_code: coupon.trim() } : {}),
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
-      // SellAuth cannot redirect back to us, so pay in a new tab and keep this tab on our
-      // confirmation screen, which polls until the payment lands.
       localStorage.setItem("pokeforge_checkout_url", data.checkout_url);
-      window.open(data.checkout_url, "_blank", "noopener");
+      if (payWindow && !payWindow.closed) payWindow.location.href = data.checkout_url;
+      else window.open(data.checkout_url, "_blank", "noopener");
       navigate(`/payment/success?session_id=${data.session_id}`);
     } catch (err) {
+      if (payWindow && !payWindow.closed) payWindow.close();
       const msg = apiError(err);
       setError(msg);
       toast.error(msg);
@@ -114,8 +74,13 @@ export default function Checkout() {
 
         {invalid && (
           <div data-testid="checkout-validation-error" className="mt-8 flex gap-3 border border-[#ff3b30] bg-[#ff3b30]/10 p-4 text-xs text-[#ff3b30]">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            An Event Pass requires at least one Pokécoin Bundle in your cart.
+            <div className="flex gap-3">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                An Event Pass can't be bought on its own — add Pokécoins, Stardust or a Medal bundle
+                to unlock checkout. One pass per order.
+              </span>
+            </div>
           </div>
         )}
 
@@ -179,7 +144,7 @@ export default function Checkout() {
             disabled={busy || invalid}
             className="mt-8 w-full border border-[#00ffcc] py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
           >
-            {busy ? "Opening secure payment…" : `Pay ${money(payable)}`}
+            {busy ? "Opening secure payment…" : `Pay ${money(total)}`}
           </button>
         </form>
       </div>
@@ -206,69 +171,22 @@ export default function Checkout() {
             <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500">
               Discount code
             </label>
-            {applied ? (
-              <div
-                data-testid="applied-coupon"
-                className="flex items-center justify-between gap-3 border border-[#00ffcc]/50 bg-[#00ffcc]/[0.06] p-3"
-              >
-                <span className="text-xs font-bold text-[#00ffcc]">
-                  {applied.coupon_code} · {applied.discount_label}
-                </span>
-                <button
-                  type="button"
-                  data-testid="remove-coupon-btn"
-                  onClick={removeCoupon}
-                  className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-[#ff3b30]"
-                >
-                  Remove
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  data-testid="coupon-input"
-                  value={coupon}
-                  onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-                  placeholder="ENTER CODE"
-                  className="flex-1 bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
-                />
-                <button
-                  type="button"
-                  data-testid="apply-coupon-btn"
-                  onClick={applyCoupon}
-                  disabled={couponBusy}
-                  className="border border-[#00ffcc] px-4 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:opacity-50"
-                >
-                  {couponBusy ? "…" : "Apply"}
-                </button>
-              </div>
-            )}
-            {couponError && (
-              <p data-testid="coupon-error" className="mt-2 text-[10px] leading-relaxed text-[#ff3b30]">
-                {couponError}
-              </p>
-            )}
-            {applied?.excluded_items?.length > 0 && (
-              <p data-testid="coupon-excluded-note" className="mt-2 text-[10px] leading-relaxed text-[#f4d03f]">
-                Not valid on: {applied.excluded_items.join(", ")}
-              </p>
-            )}
+            <input
+              data-testid="coupon-input"
+              value={coupon}
+              onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+              placeholder="ENTER CODE"
+              className="w-full bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
+            />
+            <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+              Applied on the payment page — you'll see the discounted total before you pay.
+            </p>
           </div>
-
-          {applied && (
-            <div
-              data-testid="checkout-discount-row"
-              className="mt-5 flex justify-between text-xs uppercase tracking-[0.2em] text-[#00ffcc]"
-            >
-              <span>Discount</span>
-              <span>-{money(applied.discount)}</span>
-            </div>
-          )}
 
           <div className="mt-5 flex justify-between border-t border-zinc-800 pt-5 text-xs uppercase tracking-[0.2em] text-zinc-400">
             <span>Total</span>
             <span data-testid="checkout-total" className="font-display text-lg text-[#00ffcc]">
-              {money(payable)}
+              {money(total)}
             </span>
           </div>
           <p className="mt-4 text-[10px] leading-relaxed text-zinc-600">

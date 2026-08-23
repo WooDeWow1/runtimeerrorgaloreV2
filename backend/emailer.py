@@ -92,11 +92,8 @@ def _site_url() -> str:
 
 
 def order_url(order: dict) -> str:
-    """Absolute link to an order page, falling back to the configured public site."""
-    base = (order.get("origin_url") or "").rstrip("/")
-    if not base.startswith("https://"):
-        base = _site_url()
-    return f"{base}/order/{order['id'] if 'id' in order else order['_id']}"
+    """Absolute link to an order page. Always the public site so emailed links work anywhere."""
+    return f"{_site_url()}/order/{order['id'] if 'id' in order else order['_id']}"
 
 
 async def send_email(*, to: str, subject: str, html: str) -> str | None:

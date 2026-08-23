@@ -105,6 +105,40 @@ production — run it after adding products, since ids differ per database.
 - Both sends are wrapped in try/except: a provider outage can no longer fail a paid order.
 - `PUBLIC_APP_URL` added to backend/.env.
 
+## Commercial launch — SellAuth catalog (2026-06)
+- Checkout now sends SellAuth **catalog** items (`productId` + `variantId`) instead of custom lines,
+  so SellAuth owns pricing, stock and coupons. Ids live on each product
+  (`sellauth_product_id` / `sellauth_variant_id`), mapped by `/app/scripts/map_sellauth_ids.py`
+  (dry run by default, `--apply` to write; also syncs price from the SellAuth variant).
+  Shundo items stay unmapped (coming soon) and would fall back to custom lines.
+- Local coupon engine DELETED (`apply_coupon`, `/coupons/validate`, `/admin/coupons`, coupons +
+  coupon_redemptions indexes, admin Coupons tab). The checkout coupon field now passes the code
+  through as SellAuth's `coupon` param; the discount appears on SellAuth's payment page.
+- Admin Products tab is now display-only: Featured star + Coming Soon toggle, no create/edit/
+  delete/price. Product create/update/delete API endpoints still exist for scripts.
+- Cart rules: an Event Pass needs at least one non-pass item (any category) and is capped at 1 per
+  order — enforced client-side (`CartContext`, ProductCard lock) and server-side
+  (`assert_cart_rules`). Event pass copy/badge updated to "ADD-ON ONLY".
+- Announcement banner: `settings` collection doc `banner`; `GET /api/settings/banner` (public),
+  `PUT /api/admin/settings/banner` (admin, rejects non-https/non-path links). Rendered site-wide by
+  `AnnouncementBanner` above the Navbar, dismissible per session.
+- /products sorts PokéCoins first (CATEGORY_ORDER).
+- Checkout opens the SellAuth tab synchronously on click (popup-blocker safe) and closes it on error.
+- /payment/success polls every 2s for up to 2 min, unlocking chat + the claim-account card.
+- Email links always use PUBLIC_APP_URL (https://pokecoins.cc).
+
+## Catalog sync button (2026-06)
+- Admin → Products → "Push catalog live": `GET /api/admin/sync/catalog` (dry-run diff) and
+  `POST /api/admin/sync/catalog` (apply). Logic in `/app/backend/catalog_sync.py`: logs into
+  PUBLIC_APP_URL with ADMIN_EMAIL/ADMIN_PASSWORD, matches products by NAME, creates missing ones
+  and PUTs changed fields. Never deletes. Replaces `scripts/sync_products_to_prod.py`.
+- `sellauth_product_id` / `sellauth_variant_id` added to ProductIn + ProductUpdate so the ids
+  can be pushed over the API (previously only settable by direct DB scripts).
+- Finding 2026-06: production has all 13 products but is MISSING every SellAuth id, so live
+  checkout falls back to custom line items. One "Push to production" fixes it. Not pushed yet
+  (waiting on the user, since it writes to the production database).
+- Backlog: sync does not push banner settings or delete products removed in preview.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
