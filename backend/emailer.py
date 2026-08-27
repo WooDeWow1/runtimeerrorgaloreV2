@@ -91,6 +91,19 @@ def _site_url() -> str:
     return url if url.startswith("https://") else "https://pokecoins.cc"
 
 
+def support_email() -> str:
+    return os.environ.get("EMAIL_REPLY_TO", "")
+
+
+def support_line() -> str:
+    """Footer line so buyers can reply or write in directly."""
+    address = support_email()
+    if not address:
+        return ""
+    safe = escape(address)
+    return f'Questions? Reply to this email or write to <a href="mailto:{safe}" style="color:#71717a">{safe}</a>.<br>'
+
+
 def order_url(order: dict) -> str:
     """Absolute link to an order page. Always the public site so emailed links work anywhere."""
     return f"{_site_url()}/order/{order['id'] if 'id' in order else order['_id']}"
@@ -142,6 +155,7 @@ def _wrap(inner: str) -> str:
         '<tr><td style="border-top:1px solid #e4e4e7;padding:16px 24px;'
         'font-family:Arial,sans-serif;font-size:11px;color:#71717a">'
         f'Sent by {brand} · <a href="{site}" style="color:#71717a">{site}</a><br>'
+        f'{support_line()}'
         'We never ask for your password or payment details by email.'
         '</td></tr></table></td></tr></table>'
     )

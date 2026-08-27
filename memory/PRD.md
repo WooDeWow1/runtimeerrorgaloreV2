@@ -172,6 +172,14 @@ production — run it after adding products, since ids differ per database.
 - Still open (backlog): CORS `allow_origin_regex='.*'` with credentials, native date input for coupon
   expiry, server.py is ~1300 lines and should be split into routers.
 
+## Email (2026-06)
+- `EMAIL_REPLY_TO` is now `support@pokecoins.cc` (was `pokecoinorders@gmail.com`). It is sent to the
+  Emergent email proxy as `contact_email`, so replies to any order/chat email land there.
+- `emailer.support_line()` also prints the address in the branded footer of every email
+  ("Questions? Reply to this email or write to support@pokecoins.cc"). Verified against the G2/G3
+  safety gate. NOTE: production has its own env — the same key must be set there before the change
+  is live on pokecoins.cc.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
