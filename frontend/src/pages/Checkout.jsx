@@ -22,8 +22,36 @@ export default function Checkout() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [coupon, setCoupon] = useState("");
+  const [applied, setApplied] = useState(null);
+  const [couponBusy, setCouponBusy] = useState(false);
 
   const cartPayload = items.map((i) => ({ product_id: i.id, quantity: i.quantity }));
+
+  const applyCoupon = async () => {
+    if (!coupon.trim()) return;
+    setCouponBusy(true);
+    try {
+      const { data } = await api.post("/coupons/validate", {
+        code: coupon.trim(),
+        items: cartPayload,
+        ...(isGuest && email ? { email } : {}),
+      });
+      setApplied(data);
+      toast.success(`${data.code} applied — you save ${money(data.discount)}`);
+    } catch (err) {
+      setApplied(null);
+      toast.error(apiError(err));
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setApplied(null);
+    setCoupon("");
+  };
+
+  const payable = applied ? applied.total : total;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -37,7 +65,7 @@ export default function Checkout() {
         ptc_username: ptcUsername,
         ptc_password: ptcPassword,
         origin_url: window.location.origin,
-        ...(coupon.trim() ? { coupon_code: coupon.trim() } : {}),
+        ...(applied ? { coupon_code: applied.code } : {}),
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
@@ -144,7 +172,7 @@ export default function Checkout() {
             disabled={busy || invalid}
             className="mt-8 w-full border border-[#00ffcc] py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
           >
-            {busy ? "Opening secure payment…" : `Pay ${money(total)}`}
+            {busy ? "Opening secure payment…" : `Pay ${money(payable)}`}
           </button>
         </form>
       </div>
@@ -171,22 +199,66 @@ export default function Checkout() {
             <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500">
               Discount code
             </label>
-            <input
-              data-testid="coupon-input"
-              value={coupon}
-              onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-              placeholder="ENTER CODE"
-              className="w-full bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
-            />
-            <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
-              Applied on the payment page — you'll see the discounted total before you pay.
-            </p>
+            <div className="flex gap-2">
+              <input
+                data-testid="coupon-input"
+                value={coupon}
+                onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                placeholder="ENTER CODE"
+                disabled={!!applied}
+                className="w-full bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc] disabled:opacity-50"
+              />
+              {applied ? (
+                <button
+                  type="button"
+                  data-testid="remove-coupon-btn"
+                  onClick={removeCoupon}
+                  className="shrink-0 border border-zinc-700 px-4 text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white"
+                >
+                  Remove
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="apply-coupon-btn"
+                  onClick={applyCoupon}
+                  disabled={couponBusy}
+                  className="shrink-0 border border-[#00ffcc] px-4 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc] hover:bg-[#00ffcc] hover:text-black disabled:opacity-40"
+                >
+                  {couponBusy ? "…" : "Apply"}
+                </button>
+              )}
+            </div>
+            {applied ? (
+              <div data-testid="coupon-applied" className="mt-3 border border-[#00ffcc]/40 bg-[#00ffcc]/[0.06] p-3 text-[10px] leading-relaxed text-[#00ffcc]">
+                {applied.code} · −{money(applied.discount)}
+                {applied.excluded_names?.length > 0 && (
+                  <span className="mt-1 block text-zinc-500">
+                    Not discounted: {applied.excluded_names.join(", ")}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+                Codes cannot be applied to Event Passes. In a mixed cart the discount applies to the
+                eligible items only.
+              </p>
+            )}
           </div>
+
+          {applied && (
+            <div className="mt-5 flex justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
+              <span>Discount</span>
+              <span data-testid="checkout-discount" className="text-[#00ffcc]">
+                −{money(applied.discount)}
+              </span>
+            </div>
+          )}
 
           <div className="mt-5 flex justify-between border-t border-zinc-800 pt-5 text-xs uppercase tracking-[0.2em] text-zinc-400">
             <span>Total</span>
             <span data-testid="checkout-total" className="font-display text-lg text-[#00ffcc]">
-              {money(total)}
+              {money(payable)}
             </span>
           </div>
           <p className="mt-4 text-[10px] leading-relaxed text-zinc-600">

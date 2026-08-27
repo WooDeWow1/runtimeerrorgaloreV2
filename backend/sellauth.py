@@ -29,28 +29,51 @@ class SellAuthPlanError(SellAuthError):
     pass
 
 
-async def create_checkout(*, items: list[dict], email: str, session_id: str,
-                          coupon: Optional[str] = None) -> dict:
+async def fetch_product(product_id: int) -> dict:
+    """Look up a SellAuth product so the admin only ever types its id."""
+    async with httpx.AsyncClient(timeout=25) as client:
+        resp = await client.get(
+            f"{SELLAUTH_BASE}/shops/{_shop_id()}/products/{int(product_id)}", headers=_headers()
+        )
+    if resp.is_error:
+        raise SellAuthError(f"SellAuth product {product_id} not found ({resp.status_code})")
+    data = resp.json()
+    product = data.get("product") if isinstance(data.get("product"), dict) else data
+    variants = product.get("variants") or []
+    if not variants:
+        raise SellAuthError(f"SellAuth product {product_id} has no variants")
+    variant = variants[0]
+    return {
+        "sellauth_product_id": int(product.get("id", product_id)),
+        "sellauth_variant_id": int(variant["id"]),
+        "price": float(variant["price"]),
+        "name": product.get("name") or "",
+        "description": product.get("description") or "",
+    }
+
+
+async def create_checkout(*, items: list[dict], email: str, session_id: str) -> dict:
     """Create a SellAuth hosted checkout. Catalog items use the shop's product/variant ids so
-    SellAuth owns pricing, stock and coupons; anything unmapped falls back to a custom line."""
+    SellAuth owns pricing and stock. Discounted lines carry a `custom_price` and are sent as
+    custom items instead, because a catalog price cannot be overridden."""
     cart = []
     for i in items:
-        if i.get("sellauth_product_id") and i.get("sellauth_variant_id"):
+        custom_price = i.get("custom_price")
+        if custom_price is None and i.get("sellauth_product_id") and i.get("sellauth_variant_id"):
             cart.append({
                 "productId": int(i["sellauth_product_id"]),
                 "variantId": int(i["sellauth_variant_id"]),
                 "quantity": i["quantity"],
             })
         else:
-            cart.append({"name": i["name"], "price": f"{i['price']:.2f}", "quantity": i["quantity"]})
+            price = float(custom_price if custom_price is not None else i["price"])
+            cart.append({"name": i["name"], "price": f"{price:.2f}", "quantity": i["quantity"]})
     payload: dict[str, Any] = {
         "cart": cart,
         "email": email,
         "currency": "USD",
         "metadata": {"checkout_session_id": session_id},
     }
-    if coupon:
-        payload["coupon"] = coupon.strip()
     async with httpx.AsyncClient(timeout=25) as client:
         resp = await client.post(
             f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload

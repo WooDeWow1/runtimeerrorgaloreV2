@@ -139,6 +139,39 @@ production — run it after adding products, since ids differ per database.
   (waiting on the user, since it writes to the production database).
 - Backlog: sync does not push banner settings or delete products removed in preview.
 
+## Hybrid launch — Emergent owns catalog + coupons, SellAuth owns checkout (2026-06)
+- **Categories are data**, not code: `categories` collection ({key, label, note, coming_soon, order}).
+  `GET /api/categories` (public); admin POST / PUT / `POST /{id}/move` {up|down} / DELETE (delete is
+  blocked while products still use the key). `key` is slugified from the label on create and is
+  NEVER re-slugified on rename, so product references stay intact. Seeded: Pokécoins, Event Passes,
+  PokéLid Stamp Rally, Platinum Medals, Stardust, Shundo Hunting (Waitlist, coming soon).
+  Frontend reads them via `lib/useCategories.js`; `CATEGORY_LABELS` deleted from api.js.
+- **Admin Products** is a full editor again (`components/admin/ProductEditor.jsx`): name, description,
+  category, price, MSRP, badge, image filename, SellAuth product id, active/coming soon/featured.
+  Image filenames resolve to `/images/<file>` with a live thumbnail. `GET /api/admin/sellauth/products/{id}`
+  + `sellauth_fields()` auto-resolve the variant id and overwrite price from the live SellAuth variant
+  on create and whenever the SellAuth id changes, so ids/prices are never typed twice.
+- **Coupon engine rebuilt on this side** (`discount_eligible` / `load_coupon` / `compute_discount`):
+  percent or fixed, expiry, min cart, max uses, one-per-customer (`coupon_redemptions`), category
+  exclusions. Event Passes can NEVER be discounted — blocked by `NO_DISCOUNT_CATEGORIES=["event_pass"]`
+  AND `NO_DISCOUNT_SELLAUTH_IDS=[851924, 851927, 851928]`. Mixed carts discount only the eligible
+  lines; the discount is spread across them so SellAuth receives the exact final total.
+  `POST /api/coupons/validate` powers the Apply button on checkout; admin CRUD at `/api/admin/coupons`.
+  Redemption is recorded on the webhook (paid) path, not at checkout.
+- **No coupon code is sent to SellAuth any more.** The user disables the coupon field in the SellAuth
+  dashboard themselves (no API for it). When a coupon applies, those lines go to SellAuth as CUSTOM
+  line items (`custom_price`) because a catalog price cannot be overridden; full-price carts still use
+  catalog productId/variantId so SellAuth keeps stock tracking.
+- New PokéLid products seeded: Japan PokéLid Stamp Rally Collection (857694) and LEGO PokéLid Stamp
+  Rally (857690), prices pulled live from SellAuth ($49.99), images `/images/japanlid.jpg` and
+  `/images/legolid.jpg`.
+- Home page is a single flat "Featured Stock" grid (1/2/3/4 cols) — no per-category sections.
+- Iteration 15 fixes after testing: PUT /admin/coupons now rejects duplicate codes (was a 500 from
+  the unique index) and enforces the same percent_off/amount_off guards as POST; category and coupon
+  deletes now confirm in the UI.
+- Still open (backlog): CORS `allow_origin_regex='.*'` with credentials, native date input for coupon
+  expiry, server.py is ~1300 lines and should be split into routers.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

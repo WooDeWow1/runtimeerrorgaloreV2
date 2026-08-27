@@ -30,14 +30,6 @@ export function apiError(e) {
 
 export const money = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-export const CATEGORY_LABELS = {
-  pokecoin_bundle: "Pokécoin Bundles",
-  event_pass: "Event Passes",
-  medals: "Platinum Medals",
-  stardust: "Stardust",
-  shundo_service: "Shundo Hunting Services",
-};
-
 export const STATUS_LABELS = {
   awaiting_payment: "Awaiting Payment",
   pending: "Pending",

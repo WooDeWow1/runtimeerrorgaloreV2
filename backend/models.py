@@ -6,7 +6,10 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
 PyObjectId = Annotated[str, BeforeValidator(lambda v: str(v) if isinstance(v, ObjectId) else v)]
 
-CATEGORIES = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"]
+CATEGORIES = ["pokecoin_bundle", "event_pass", "pokelid", "medals", "stardust", "shundo_service"]
+# Event Passes may never be discounted, by category and by SellAuth product id.
+NO_DISCOUNT_CATEGORIES = ["event_pass"]
+NO_DISCOUNT_SELLAUTH_IDS = [851924, 851927, 851928]
 ORDER_STATUSES = ["awaiting_payment", "pending", "processing", "completed", "cancelled"]
 
 
@@ -104,6 +107,32 @@ class Product(BaseDocument):
     is_featured: bool = False
     sellauth_product_id: Optional[int] = None
     sellauth_variant_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+# ---------- Categories ----------
+class CategoryIn(BaseModel):
+    label: str = Field(min_length=1, max_length=60)
+    note: str = ""
+    coming_soon: bool = False
+
+
+class CategoryUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    note: Optional[str] = None
+    coming_soon: Optional[bool] = None
+
+
+class CategoryMove(BaseModel):
+    direction: Literal["up", "down"]
+
+
+class Category(BaseDocument):
+    key: str
+    label: str
+    note: str = ""
+    coming_soon: bool = False
+    order: int = 0
     created_at: datetime = Field(default_factory=utc_now)
 
 

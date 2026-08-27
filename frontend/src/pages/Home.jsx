@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ShieldCheck, Zap, Lock } from "lucide-react";
 import { api } from "@/lib/api";
+import { useCategories } from "@/lib/useCategories";
 import { ProductCard } from "@/components/ProductCard";
 import { useCart } from "@/context/CartContext";
 
@@ -10,11 +11,11 @@ const HERO = "/images/snorlax.jpg";
 const GENGAR = "/images/Mainpage.jpg";
 const PSYDUCK = "/images/psyduck.jpg";
 
-const ORDER = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"];
-
 export default function Home() {
   const [products, setProducts] = useState([]);
   const { setOpen } = useCart();
+  const { categories } = useCategories();
+  const order = categories.map((c) => c.key);
 
   useEffect(() => {
     api.get("/products").then(({ data }) => setProducts(data)).catch(() => {});
@@ -22,7 +23,7 @@ export default function Home() {
 
   const featured = products
     .filter((p) => p.is_featured)
-    .sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
+    .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
   const hasAnyFeatured = featured.length > 0;
 
   return (

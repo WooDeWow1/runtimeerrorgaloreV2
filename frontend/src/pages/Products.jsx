@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { api, CATEGORY_LABELS } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useCategories } from "@/lib/useCategories";
 import { ProductCard } from "@/components/ProductCard";
-
-const TABS = [
-  { key: "all", label: "All" },
-  { key: "pokecoin_bundle", label: "PokéCoins" },
-  { key: "event_pass", label: "Event Passes" },
-  { key: "medals", label: "Platinum Medals" },
-  { key: "stardust", label: "Stardust" },
-  { key: "shundo_service", label: "Shundo Hunting (Waitlist)" },
-];
-
-const CATEGORY_ORDER = ["pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"];
 
 export default function Products() {
   const [products, setProducts] = useState([]);
   const [tab, setTab] = useState("all");
+  const { categories, labelOf } = useCategories();
+  const order = useMemo(() => categories.map((c) => c.key), [categories]);
+  const tabs = useMemo(
+    () => [{ key: "all", label: "All" }, ...categories.map((c) => ({ key: c.key, label: c.label }))],
+    [categories]
+  );
 
   useEffect(() => {
     api.get("/products").then(({ data }) => setProducts(data)).catch(() => {});
@@ -24,11 +20,9 @@ export default function Products() {
 
   const visible = useMemo(() => {
     const list = tab === "all" ? products : products.filter((p) => p.category === tab);
-    // PokéCoins always lead the default view.
-    return [...list].sort(
-      (a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category)
-    );
-  }, [products, tab]);
+    // Categories lead in the order set in the admin panel.
+    return [...list].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+  }, [products, tab, order]);
 
   return (
     <div data-testid="products-page" className="mx-auto max-w-[1400px] px-5 py-16 lg:px-10 lg:py-24">
@@ -40,7 +34,7 @@ export default function Products() {
       </p>
 
       <div className="mt-12 flex flex-wrap gap-3 border-b border-[#1f1f1f] pb-6">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             data-testid={`filter-tab-${t.key}`}
@@ -70,7 +64,7 @@ export default function Products() {
 
       {visible.length === 0 && (
         <p data-testid="products-empty" className="mt-12 text-xs text-zinc-600">
-          Nothing listed in {CATEGORY_LABELS[tab] || "this category"} right now — check back this week.
+          Nothing listed in {tab === "all" ? "this category" : labelOf(tab)} right now — check back this week.
         </p>
       )}
     </div>

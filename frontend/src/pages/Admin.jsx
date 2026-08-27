@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Download, Eye, KeyRound, Megaphone, Star, UploadCloud, Users } from "lucide-react";
+import { BarChart3, Download, Eye, KeyRound, Megaphone, Pencil, Plus, Star, Trash2, UploadCloud, Users } from "lucide-react";
 import { toast } from "sonner";
-import { api, apiError, CATEGORY_LABELS, money, STATUS_LABELS } from "@/lib/api";
+import { api, apiError, money, STATUS_LABELS } from "@/lib/api";
+import { useCategories } from "@/lib/useCategories";
+import { CategoriesTab } from "@/components/admin/CategoriesTab";
+import { CouponsTab } from "@/components/admin/CouponsTab";
+import { ProductEditor } from "@/components/admin/ProductEditor";
 import { StatusBadge } from "@/components/StatusBadge";
 import { OrderChat } from "@/components/OrderChat";
 
@@ -21,6 +25,8 @@ export default function Admin() {
   const [banner, setBanner] = useState({ enabled: false, text: "", link_url: "", link_label: "" });
   const [bannerBusy, setBannerBusy] = useState(false);
   const [waitlistQuery, setWaitlistQuery] = useState("");
+  const [editingProduct, setEditingProduct] = useState(null); // null | "new" | product
+  const { categories, labelOf, reload: reloadCategories } = useCategories();
   const [sync, setSync] = useState(null);
   const [syncBusy, setSyncBusy] = useState(false);
 
@@ -164,6 +170,17 @@ export default function Admin() {
     }
   };
 
+  const deleteProduct = async (product) => {
+    if (!window.confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/products/${product.id}`);
+      toast.success(`${product.name} deleted`);
+      loadProducts();
+    } catch (e) {
+      toast.error(apiError(e));
+    }
+  };
+
   const saveBanner = async (e) => {
     e.preventDefault();
     setBannerBusy(true);
@@ -186,6 +203,8 @@ export default function Admin() {
         {[
           { key: "orders", label: "orders" },
           { key: "products", label: "products" },
+          { key: "categories", label: "categories" },
+          { key: "coupons", label: "discount codes" },
           { key: "waitlist", label: "waitlist" },
           { key: "settings", label: "settings & analytics" },
         ].map((t) => (
@@ -312,7 +331,7 @@ export default function Admin() {
                 )}
                 {sync.creates.map((c) => (
                   <p key={c.name} className="mt-2 text-zinc-300">
-                    <span className="text-[#00ffcc]">NEW</span> {c.name} · {CATEGORY_LABELS[c.category] || c.category} · {money(c.price)}
+                    <span className="text-[#00ffcc]">NEW</span> {c.name} · {labelOf(c.category)} · {money(c.price)}
                   </p>
                 ))}
                 {sync.updates.map((u) => (
@@ -328,11 +347,34 @@ export default function Admin() {
             )}
           </div>
 
-          <p className="mt-8 max-w-2xl text-[10px] leading-relaxed text-zinc-600">
-            Pricing, stock and discount codes now live in SellAuth. Here you control how each product
-            looks on the site: star it for the home page, or flag it Coming Soon (visible, unbuyable,
-            collects waitlist signups).
-          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
+            <p className="max-w-2xl text-[10px] leading-relaxed text-zinc-600">
+              Add or edit products here — the SellAuth variant ID and live price are pulled from your
+              SellAuth dashboard automatically. Images are read from frontend/public/images.
+            </p>
+            <button
+              data-testid="new-product-btn"
+              onClick={() => setEditingProduct("new")}
+              className="flex items-center gap-2 border border-[#00ffcc] px-4 py-2 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
+            >
+              <Plus className="h-3 w-3" /> Add product
+            </button>
+          </div>
+
+          {editingProduct && (
+            <div className="mt-6">
+              <ProductEditor
+                product={editingProduct === "new" ? null : editingProduct}
+                categories={categories}
+                onCancel={() => setEditingProduct(null)}
+                onSaved={() => {
+                  setEditingProduct(null);
+                  loadProducts();
+                }}
+              />
+            </div>
+          )}
+
           <div className="mt-8 space-y-4">
             {products.map((p) => (
               <div key={p.id} data-testid={`admin-product-${p.id}`} className="flex flex-wrap items-center gap-4 border border-[#1f1f1f] bg-[#0a0a0a] p-4">
@@ -340,12 +382,27 @@ export default function Admin() {
                 <div className="min-w-[200px] flex-1">
                   <p className="text-xs font-bold">{p.name}</p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                    {CATEGORY_LABELS[p.category]} · {money(p.price)}
+                    {labelOf(p.category)} · {money(p.price)}
                     {p.sellauth_product_id ? ` · SA ${p.sellauth_product_id}` : " · not in SellAuth"}
                     {p.coming_soon ? " · soon" : ""}
                     {p.is_featured ? " · featured" : ""}
+                    {p.active === false ? " · hidden" : ""}
                   </p>
                 </div>
+                <button
+                  data-testid={`edit-product-${p.id}`}
+                  onClick={() => setEditingProduct(p)}
+                  className="border border-zinc-800 p-2 text-zinc-400 transition-colors hover:border-[#00ffcc] hover:text-[#00ffcc]"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  data-testid={`delete-product-${p.id}`}
+                  onClick={() => deleteProduct(p)}
+                  className="border border-zinc-800 p-2 text-zinc-400 transition-colors hover:border-[#ff3b30] hover:text-[#ff3b30]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
                 <button
                   data-testid={`toggle-featured-${p.id}`}
                   aria-pressed={p.is_featured}
@@ -376,6 +433,10 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {tab === "categories" && <CategoriesTab categories={categories} reload={reloadCategories} />}
+
+      {tab === "coupons" && <CouponsTab categories={categories} />}
 
       {tab === "waitlist" && (
         <div className="mt-10" data-testid="waitlist-panel">

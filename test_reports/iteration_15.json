@@ -1,0 +1,56 @@
+{
+  "summary": "Full backend + frontend verification of the hybrid launch build (Emergent owns catalog/coupons, SellAuth owns payment). 36 pytest cases across 3 new files (34 pass, 2 fail on a real PUT-coupon bug) plus 6 Playwright UI runs covering storefront tabs, checkout coupon flow, admin Categories/Products/Coupons/Orders and the live SellAuth handoff. Categories CRUD/reorder/in-use-delete-block, SellAuth id->variant+price auto-resolve, both PokéLid products (857694/857690, /images/japanlid.jpg + /images/legolid.jpg load 200), coupon engine maths, the Event Pass hard block, discounted checkout (verified end-to-end on the live SellAuth invoice: $17.98 cart with TEST20 -> $11.99/$14.98 custom line, correct product name shown on SellAuth), synchronous popup open, and all regressions (cart rules, PTC reveal, order chat, banner, catalog sync diff) all behave as specified. Auth playbook re-verified: bcrypt $2b$, httpOnly+Secure+SameSite=None cookies, 5-fail 429 lockout, env admin seed.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/admin/coupons/{id}", "issue": "Renaming a coupon to a code that already exists raises an uncaught pymongo DuplicateKeyError (unique index code_1) -> 500 Internal Server Error. POST correctly returns 400 'That code already exists'; PUT has no duplicate check.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PUT /api/admin/coupons/{id}", "issue": "PUT skips the create-time guards: a percent coupon can be saved with percent_off=null (returns 200). The code then still validates as 'active' but fails at checkout with the confusing message 'That code gives no discount on this cart'. Same for fixed/amount_off."},
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout keys on the client-supplied X-Forwarded-For first hop (client_ip()). It works (5 fails -> 429) but is bypassable by rotating/spoofing the header, and the pod egress IP itself rotates behind the ingress so genuine attackers with 2+ IPs get 5 tries each. Consider an additional per-email global counter."},
+      {"endpoint": "CORS middleware", "issue": "allow_origin_regex='.*' combined with allow_credentials=True. In preview the ingress rewrites ACAO to '*', but on the production custom domain the app will echo any origin back with credentials allowed. Use an explicit origin allow-list."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CategoriesTab", "issue": "delete-category-<key> deletes immediately with no window.confirm; a mis-click on an unused category permanently removes a storefront tab (product delete does confirm). Same for delete-coupon-<code>.", "selector": "[data-testid^=\"delete-category-\"], [data-testid^=\"delete-coupon-\"]", "priority": "MEDIUM"},
+      {"component": "CouponsTab edit", "issue": "Editing a coupon and clearing the value field saves percent_off=null (server accepts it on PUT), creating a silently dead code. Needs client-side required validation until the API guard is added.", "selector": "[data-testid=\"coupon-value-input\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin > Discount codes", "issues": ["Expiry uses the browser's native date input (mm/dd/yyyy) instead of the shadcn calendar/date-picker used elsewhere - inconsistent with the rest of the console"]},
+      {"screen": "Admin > Categories", "issues": ["Row order number and key/note text are zinc-600 on #0a0a0a (very low contrast, ~2:1); readable but below WCAG AA"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hybrid_coupons_v7.py",
+    "/app/backend/tests/test_coupon_db_v7.py",
+    "/app/backend/tests/test_auth_playbook_v7.py",
+    "/app/test_reports/pytest/iter15_results.xml"
+  ],
+  "action_items": [
+    "Wrap PUT /api/admin/coupons/{id} in a duplicate-code check (or catch DuplicateKeyError) and return 400 instead of 500",
+    "Apply the same percent_off/amount_off required validation on PUT /api/admin/coupons that POST already enforces",
+    "Add a confirm step to category and coupon delete buttons in the admin UI",
+    "Replace CORS allow_origin_regex='.*' with an explicit origin list before the production launch",
+    "Optional: swap the native coupon expiry date input for the shadcn date picker"
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is 1269 lines - split into routers (auth, catalog/categories, coupons, orders/checkout, admin/analytics) before it grows further",
+    "MIN_CHARGE = 0.50 is declared twice in server.py (lines ~77 and ~511) - keep one definition",
+    "compute_discount() spreads the discount by a factor and then recomputes `discount` from the rounded line prices, so tiny rounding drift is possible on multi-line eligible carts (verified exact for the specified cases); add a unit test for 3+ eligible lines",
+    "update_category() does not re-slugify `key` on rename, so keys go stale (e.g. label 'QA Renamed Zone' keeps key qa_temp_zone). Intentional for referential integrity but worth documenting for the admin UI",
+    "validate_coupon() intentionally skips assert_cart_rules(); a coupon can be validated on an Event-Pass-only cart (correctly rejected by the Event Pass guard) - no action needed, just noting the asymmetry"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_hybrid_coupons_v7.py",
+    "/app/backend/tests/test_coupon_db_v7.py",
+    "/app/backend/tests/test_auth_playbook_v7.py"
+  ],
+  "success_rate": {"backend": "94% (34/36 pytest cases; the 2 failures are the PUT-coupon bug above)", "frontend": "100% of tested flows (storefront tabs, home flat grid, checkout coupon apply/remove/reject, admin categories/products/coupons/orders, SellAuth popup)"},
+  "seed_data_creation": "All test data created and then deleted: coupon TEST20 (20%, recreated automatically by the test20 fixture if missing - it did NOT pre-exist and has been removed again), TEST_QA_* coupons, category 'QA Temp Zone' (qa_temp_zone), product 'QA Temp Product' (pokelid, SA 857694), coupon_redemptions + login_attempts probe rows purged. Store is back to 6 categories / 15 products / 7 real coupons (STRAW, GURU, FLEECE, GOFEST, META, 1337, FOREVERFRIENDS). Four unpaid SellAuth test invoices were created (e.g. 15355352) - none paid; their checkout_sessions expire via the 30-min TTL.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md) - verified working. SellAuth rejects @example.com emails at checkout ('The email must be a valid email address'); use a real-looking domain such as pokecoinsqa@gmail.com for checkout tests.",
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/test_hybrid_coupons_v7.py tests/test_coupon_db_v7.py tests/test_auth_playbook_v7.py -q` - the 2 TestCouponUpdateValidation failures are the open PUT-coupon bug (delete those tests only once fixed and they pass). The test20 fixture creates/reuses coupon TEST20 automatically. Playwright notes: the cart is a drawer (data-testid cart-drawer, cart-remove-<id>), NOT a /cart route; an Event Pass card's add button renders as 'Locked' when the cart has no other item so an Event-Pass-only cart is unreachable through the UI (that path is covered at the API level instead); window.confirm handlers must use asyncio.ensure_future(d.accept()) or clicks hang. Do NOT click sync-push-btn (writes to pokecoins.cc).",
+  "rca_of_the_issue": "PUT /admin/coupons 500: update_coupon() does `db.coupons.update_one({_id}, {$set: {...code}})` without checking whether another document already owns that code; the unique index `coupons.code_1` then raises pymongo DuplicateKeyError, which FastAPI turns into a 500 (confirmed in /var/log/supervisor/backend.err.log: 'E11000 duplicate key error collection: test_database.coupons index: code_1'). Mitigation: replicate the POST guard (find_one({'code': code, '_id': {'$ne': oid(coupon_id)}}) -> 400) and also re-run the percent/fixed value checks on update."
+}
