@@ -43,12 +43,26 @@ async def fetch_product(product_id: int) -> dict:
     if not variants:
         raise SellAuthError(f"SellAuth product {product_id} has no variants")
     variant = variants[0]
+    name = product.get("name") or ""
+
+    def short_label(raw: str) -> str:
+        """SellAuth names variants '<Product> (Ultra Box)': keep just the option part."""
+        label = (raw or "").strip()
+        if name and label.startswith(name):
+            label = label[len(name):].strip()
+        return label.strip("()-– ").strip() or "Standard"
+
     return {
         "sellauth_product_id": int(product.get("id", product_id)),
         "sellauth_variant_id": int(variant["id"]),
         "price": float(variant["price"]),
-        "name": product.get("name") or "",
+        "name": name,
         "description": product.get("description") or "",
+        "variants": [
+            {"label": short_label(v.get("name")), "sellauth_variant_id": int(v["id"]),
+             "price": float(v["price"])}
+            for v in variants
+        ],
     }
 
 

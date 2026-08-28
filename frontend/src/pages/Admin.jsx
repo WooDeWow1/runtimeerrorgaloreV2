@@ -232,7 +232,7 @@ export default function Admin() {
                     #{o.id.slice(-8)} · {o.user_email}
                   </p>
                   <p className="mt-2 text-xs text-zinc-300">
-                    {o.items.map((i) => `${i.name} ×${i.quantity}`).join(" · ")}
+                    {o.items.map((i) => `${i.name}${i.variant_label ? ` — ${i.variant_label}` : ""} ×${i.quantity}`).join(" · ")}
                   </p>
           <p className="mt-1 text-xs text-[#00ffcc]">
             {money(o.total)}

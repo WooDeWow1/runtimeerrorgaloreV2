@@ -61,6 +61,12 @@ class ClaimOrderRequest(BaseModel):
 
 
 # ---------- Products ----------
+class ProductVariant(BaseModel):
+    label: str = Field(min_length=1, max_length=60)
+    sellauth_variant_id: int
+    price: float = Field(gt=0)
+
+
 class ProductIn(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
@@ -75,6 +81,7 @@ class ProductIn(BaseModel):
     is_featured: bool = False
     sellauth_product_id: Optional[int] = None
     sellauth_variant_id: Optional[int] = None
+    variants: List[ProductVariant] = Field(default_factory=list)
 
 
 class ProductUpdate(BaseModel):
@@ -91,6 +98,7 @@ class ProductUpdate(BaseModel):
     is_featured: Optional[bool] = None
     sellauth_product_id: Optional[int] = None
     sellauth_variant_id: Optional[int] = None
+    variants: Optional[List[ProductVariant]] = None
 
 
 class Product(BaseDocument):
@@ -107,6 +115,7 @@ class Product(BaseDocument):
     is_featured: bool = False
     sellauth_product_id: Optional[int] = None
     sellauth_variant_id: Optional[int] = None
+    variants: List[ProductVariant] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -147,6 +156,7 @@ class BannerSettings(BaseModel):
 class CartItemIn(BaseModel):
     product_id: str
     quantity: int = Field(default=1, ge=1, le=50)
+    variant_id: Optional[int] = None
 
 
 class OrderItem(BaseModel):
@@ -155,6 +165,7 @@ class OrderItem(BaseModel):
     category: str
     price: float
     quantity: int
+    variant_label: str = ""
     sellauth_product_id: Optional[int] = None
     sellauth_variant_id: Optional[int] = None
 

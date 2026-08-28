@@ -31,34 +31,39 @@ export const CartDrawer = () => {
           )}
           <div className="space-y-4">
             {items.map((i) => (
-              <div key={i.id} data-testid={`cart-item-${i.id}`} className="flex gap-4 border border-zinc-900 p-3">
+              <div key={i.key} data-testid={`cart-item-${i.key}`} className="flex gap-4 border border-zinc-900 p-3">
                 {i.image_url && (
                   <img src={i.image_url} alt={i.name} className="h-16 w-16 object-cover" />
                 )}
                 <div className="flex-1">
                   <p className="text-xs font-bold text-white">{i.name}</p>
+                  {i.variant_label && (
+                    <p data-testid={`cart-variant-${i.key}`} className="mt-1 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc]">
+                      {i.variant_label}
+                    </p>
+                  )}
                   <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                     {money(i.price)}
                   </p>
                   <div className="mt-2 flex items-center gap-2">
                     <button
-                      data-testid={`cart-dec-${i.id}`}
-                      onClick={() => setQty(i.id, i.quantity - 1)}
+                      data-testid={`cart-dec-${i.key}`}
+                      onClick={() => setQty(i.key, i.quantity - 1)}
                       className="border border-zinc-800 p-1 text-zinc-400 hover:text-[#00ffcc]"
                     >
                       <Minus className="h-3 w-3" />
                     </button>
-                    <span data-testid={`cart-qty-${i.id}`} className="w-6 text-center text-xs">{i.quantity}</span>
+                    <span data-testid={`cart-qty-${i.key}`} className="w-6 text-center text-xs">{i.quantity}</span>
                     <button
-                      data-testid={`cart-inc-${i.id}`}
-                      onClick={() => setQty(i.id, i.quantity + 1)}
+                      data-testid={`cart-inc-${i.key}`}
+                      onClick={() => setQty(i.key, i.quantity + 1)}
                       className="border border-zinc-800 p-1 text-zinc-400 hover:text-[#00ffcc]"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
                     <button
-                      data-testid={`cart-remove-${i.id}`}
-                      onClick={() => remove(i.id)}
+                      data-testid={`cart-remove-${i.key}`}
+                      onClick={() => remove(i.key)}
                       className="ml-auto text-zinc-500 hover:text-[#ff3b30]"
                     >
                       <Trash2 className="h-3.5 w-3.5" />

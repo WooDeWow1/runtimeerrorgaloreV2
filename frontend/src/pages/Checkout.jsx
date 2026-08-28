@@ -25,7 +25,11 @@ export default function Checkout() {
   const [applied, setApplied] = useState(null);
   const [couponBusy, setCouponBusy] = useState(false);
 
-  const cartPayload = items.map((i) => ({ product_id: i.id, quantity: i.quantity }));
+  const cartPayload = items.map((i) => ({
+    product_id: i.id,
+    quantity: i.quantity,
+    ...(i.variant_id ? { variant_id: i.variant_id } : {}),
+  }));
 
   const applyCoupon = async () => {
     if (!coupon.trim()) return;
@@ -182,9 +186,11 @@ export default function Checkout() {
           <p className="text-[10px] uppercase tracking-[0.25em] text-zinc-500">Order summary</p>
           <div className="mt-5 space-y-4">
             {items.map((i) => (
-              <div key={i.id} className="flex justify-between gap-4 text-xs">
+              <div key={i.key} className="flex justify-between gap-4 text-xs">
                 <span className="text-zinc-300">
-                  {i.name} <span className="text-zinc-600">× {i.quantity}</span>
+                  {i.name}
+                  {i.variant_label ? ` — ${i.variant_label}` : ""}{" "}
+                  <span className="text-zinc-600">× {i.quantity}</span>
                 </span>
                 <span className="text-white">{money(i.price * i.quantity)}</span>
               </div>

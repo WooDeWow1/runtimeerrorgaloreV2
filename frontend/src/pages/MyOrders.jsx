@@ -35,7 +35,7 @@ export default function MyOrders() {
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">#{o.id.slice(-8)}</p>
           <p className="mt-2 text-xs text-zinc-200">
-            {o.items.map((i) => `${i.name} ×${i.quantity}`).join(" · ")}
+            {o.items.map((i) => `${i.name}${i.variant_label ? ` — ${i.variant_label}` : ""} ×${i.quantity}`).join(" · ")}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">

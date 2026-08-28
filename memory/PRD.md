@@ -180,6 +180,25 @@ production — run it after adding products, since ids differ per database.
   safety gate. NOTE: production has its own env — the same key must be set there before the change
   is live on pokecoins.cc.
 
+## Product variants + description formatting (2026-06)
+- `products.variants` = `[{label, sellauth_variant_id, price}]`. Empty list = single-price product.
+  Seeded by `seed_variants()` for the two Event Passes (851924: Basic 1508676 / + 6 Ranks 1553265 /
+  Ultra Box 1553266; 851928: Basic 1508694 / +10 Ranks 1553263 / Ultra Box 1553264) with prices read
+  live from the SellAuth variants. Managed in the admin product editor (add/remove option rows, or
+  prefilled by the Fetch button — `sellauth.fetch_product()` strips the product-name prefix from
+  SellAuth's variant names so labels stay short).
+- `CartItemIn.variant_id` → `resolve_items()` picks the variant, prices the line from it and sends
+  that exact SellAuth variantId; an unknown id is a 400. `OrderItem.variant_label` is shown in the
+  cart, checkout summary, order pages, admin orders and the confirmation email.
+- A **cart line is product + variant** (`line_key()` server side, `key: productId:variantId` in
+  CartContext), so the same pass with two different options is two lines. Legacy carts in
+  localStorage are migrated on load.
+- Descriptions keep their line breaks everywhere: `whitespace-pre-line` on the card (clamped to 3
+  lines as a teaser) and in the new `ProductDetailDialog`, which opens from the card image, title or
+  "Full details" and shows the untruncated text plus the variant picker and Add to cart.
+- Iteration 16: 45/45 backend tests and all frontend flows passed; the reported console/a11y nits
+  (`<option>` child expression, missing DialogDescription) are fixed.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

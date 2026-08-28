@@ -463,11 +463,27 @@ async def resolve_items(entries) -> List[OrderItem]:
             raise HTTPException(status_code=400, detail="A product in your cart is unavailable")
         if doc.get("coming_soon"):
             raise HTTPException(status_code=400, detail=f"{doc['name']} is not available yet")
+        price = float(doc["price"])
+        variant_label = ""
+        variant_id = doc.get("sellauth_variant_id")
+        variants = doc.get("variants") or []
+        if variants:
+            chosen = next(
+                (v for v in variants if int(v["sellauth_variant_id"]) == (entry.variant_id or 0)),
+                variants[0],
+            )
+            if entry.variant_id and int(chosen["sellauth_variant_id"]) != int(entry.variant_id):
+                raise HTTPException(
+                    status_code=400, detail=f"That option is no longer available for {doc['name']}"
+                )
+            price = float(chosen["price"])
+            variant_label = chosen["label"]
+            variant_id = int(chosen["sellauth_variant_id"])
         items.append(OrderItem(
             product_id=str(doc["_id"]), name=doc["name"], category=doc["category"],
-            price=float(doc["price"]), quantity=entry.quantity,
+            price=price, quantity=entry.quantity, variant_label=variant_label,
             sellauth_product_id=doc.get("sellauth_product_id"),
-            sellauth_variant_id=doc.get("sellauth_variant_id"),
+            sellauth_variant_id=variant_id,
         ))
     return items
 
@@ -538,6 +554,11 @@ async def load_coupon(code: str, email: str) -> dict:
     return coupon
 
 
+def line_key(item: OrderItem) -> str:
+    """A cart line is a product + chosen variant."""
+    return f"{item.product_id}:{item.sellauth_variant_id or ''}"
+
+
 def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
     subtotal = round(sum(i.price * i.quantity for i in items), 2)
     eligible = [i for i in items if discount_eligible(i, coupon)]
@@ -566,9 +587,9 @@ def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
     factor = (eligible_subtotal - discount) / eligible_subtotal
     prices: dict[str, float] = {}
     for item in eligible:
-        prices[item.product_id] = max(round(item.price * factor, 2), 0.01)
+        prices[line_key(item)] = max(round(item.price * factor, 2), 0.01)
     total = round(
-        sum((prices.get(i.product_id, i.price)) * i.quantity for i in items), 2
+        sum((prices.get(line_key(i), i.price)) * i.quantity for i in items), 2
     )
     return {
         "code": coupon["code"],
@@ -577,7 +598,7 @@ def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
         "discount": round(subtotal - total, 2),
         "total": total,
         "unit_prices": prices,
-        "excluded_names": [i.name for i in items if i.product_id not in prices],
+        "excluded_names": [i.name for i in items if line_key(i) not in prices],
     }
 
 
@@ -664,8 +685,8 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     sellauth_items = []
     for i in items:
         entry = i.model_dump()
-        if i.product_id in unit_prices:
-            entry["custom_price"] = unit_prices[i.product_id]
+        if line_key(i) in unit_prices:
+            entry["custom_price"] = unit_prices[line_key(i)]
         sellauth_items.append(entry)
 
     # Nothing is written to `orders` yet: a spam-resistant temporary session with a 30 min TTL.
@@ -757,7 +778,10 @@ async def create_order_from_session(session: dict) -> Optional[str]:
                 order_id=order_id,
                 tracking_url=tracking_url,
                 total=session["total"],
-                item_lines=[f"{i['name']} x{i['quantity']}" for i in session["items"]],
+                item_lines=[
+                    f"{i['name']}{' — ' + i['variant_label'] if i.get('variant_label') else ''} x{i['quantity']}"
+                    for i in session["items"]
+                ],
             ),
         )
     except Exception as exc:
@@ -1233,6 +1257,38 @@ EXTRA_PRODUCTS = [
 ]
 
 
+SEED_VARIANTS = {
+    851924: [(1508676, "Basic"), (1553265, "+ 6 Ranks"), (1553266, "Ultra Box")],
+    851928: [(1508694, "Basic"), (1553263, "+10 Ranks"), (1553264, "Ultra Box")],
+}
+
+
+async def seed_variants():
+    """Attach the Event Pass upgrade options, pricing each one from its SellAuth variant."""
+    for sellauth_product_id, options in SEED_VARIANTS.items():
+        doc = await db.products.find_one({"sellauth_product_id": sellauth_product_id})
+        if not doc or doc.get("variants"):
+            continue
+        try:
+            remote = await sellauth.fetch_product(sellauth_product_id)
+        except (sellauth.SellAuthError, httpx.HTTPError) as exc:
+            logger.warning("Could not seed variants for %s: %s", sellauth_product_id, exc)
+            continue
+        prices = {v["sellauth_variant_id"]: v["price"] for v in remote["variants"]}
+        variants = [
+            {"label": label, "sellauth_variant_id": variant_id, "price": prices[variant_id]}
+            for variant_id, label in options
+            if variant_id in prices
+        ]
+        if not variants:
+            continue
+        await db.products.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"variants": variants, "price": variants[0]["price"],
+                      "sellauth_variant_id": variants[0]["sellauth_variant_id"]}},
+        )
+
+
 async def seed_data():
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]
@@ -1267,6 +1323,8 @@ async def seed_data():
             continue
         data = {**entry, **await sellauth_fields(entry.get("sellauth_product_id"))}
         await db.products.insert_one(Product(**data).to_mongo())
+
+    await seed_variants()
 
 
 @app.on_event("shutdown")

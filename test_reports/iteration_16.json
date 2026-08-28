@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 16 e2e: product variants (seed + selection + cart + checkout pass-through), description line-break preservation, product detail modal, admin variants editor, and regressions (Event Pass rules, coupon maths, filter tabs, admin tabs, catalog sync diff). Backend: 12/12 new pytest cases pass plus 5/5 auth-playbook and 28/28 hybrid-coupon regressions. Frontend: all requested flows verified on desktop (1920) and mobile (390). No functional defects found; only 3 minor/cosmetic issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ProductCard / ProductDetailDialog <select> options", "issue": "React console error on /products: 'In HTML, <span> cannot be a child of <option> ... This will cause a hydration error'. The option child is a JSX expression pair ({v.label} — {money(v.price)}) which the editor instrumentation wraps in a <span>. Render a single precomputed string instead, e.g. {`${v.label} — ${money(v.price)}`}.", "selector": "[data-testid^=\"variant-select-\"], [data-testid^=\"detail-variant-select-\"]", "priority": "LOW"},
+      {"component": "ProductDetailDialog", "issue": "Radix a11y warning: 'Missing Description or aria-describedby={undefined} for DialogContent'. Add <DialogDescription> (or aria-describedby) for screen readers.", "selector": "[data-testid^=\"product-detail-\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin > product editor > Fetch from SellAuth", "issues": ["Fetch prefills variant labels as the full remote name ('Weekly Event Ticket (Basic)', 'Weekly Event Ticket (Ultra Box)') instead of the short option name, so an unedited fetch would render very long labels in the storefront dropdown. Consider stripping the product-name prefix / parentheses when prefilling."]},
+      {"screen": "/products product card description", "issues": ["line-clamp-5 with whitespace-pre-line means a blank line between paragraphs consumes one of the 5 visible rows, so multi-paragraph descriptions show very little teaser text. Functional (full text is in the modal), cosmetic only."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_variants_v8.py",
+    "/app/backend/tests/test_auth_playbook_v7.py",
+    "/app/backend/tests/test_hybrid_coupons_v7.py",
+    "/app/test_reports/pytest/variants_v8.xml"
+  ],
+  "action_items": [
+    "Optional: fix the <option> child expression to avoid the hydration/console error (ProductCard.jsx L126, ProductDetailDialog.jsx L61).",
+    "Optional: add DialogDescription/aria-describedby to ProductDetailDialog.",
+    "Optional: shorten variant labels produced by the SellAuth Fetch prefill."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1332 lines — consider splitting routers (products/orders/coupons/admin) into modules; models.py + sellauth.py are fine.",
+    "resolve_items() variant handling is correct: invalid variant_id -> 400 'That option is no longer available for <name>', missing variant_id -> first variant, price/label/variant id all re-derived server side (never trusted from the client).",
+    "line_key() = productId:variantId is used consistently by compute_discount and checkout, so per-variant lines and per-line coupon spreading stay in sync; discount_eligible() still blocks event_pass by category AND SellAuth product id, so variant-priced passes can never be discounted.",
+    "seed_variants() is idempotent (skips products that already have variants) and prices from live SellAuth, so a manual admin edit is never overwritten."
+  ],
+  "updated_files": ["/app/backend/tests/test_variants_v8.py"],
+  "success_rate": {"backend": "100% (45/45 across 3 files)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "Created 'TEST_QA Variant Probe' product via the admin UI (multiline description + TEST_Small 911111 $3.50 / TEST_Large 922222 $7.25) to test the variants editor and two-variant cart lines; DELETED afterwards (verified no TEST_* products remain). One unpaid SellAuth checkout session was created to verify variant pass-through and its checkout_sessions doc was deleted. No coupons created. Weekly Event Ticket edit form was opened and cancelled without saving — its variants are unchanged.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (worked; bcrypt $2b$, httpOnly+Secure+SameSite=None cookies, lockout after 5 fails, CORS credentials all re-verified by test_auth_playbook_v7.py)",
+  "context_for_next_testing_agent": "Verified this iteration: (1) GET /api/products seeds Weekly Event Ticket [Basic 1508676 $2.99, + 6 Ranks 1553265 $4.49, Ultra Box 1553266 $5.99] and Monthly Go Pass [Basic 1508694 $4.99, +10 Ranks 1553263 $6.99, Ultra Box 1553264 $9.99]; card price + default sellauth_variant_id = Basic. (2) variant-select-<id> updates product-price-<id> ($2.99->$5.99) and detail-variant-select/detail-price stay in sync both ways. (3) Cart lines keyed productId:variantId — same product with two variants = two cart-item-<pid>:<vid> lines with independent qty (inc gave $10.75 -> $18.00) and independent remove; cart-variant-<key> shows the label; checkout order summary shows 'Name — Variant'. (4) POST /api/orders/checkout with variant_id 1553266 stores items[].sellauth_variant_id=1553266, price 5.99, variant_label 'Ultra Box' in checkout_sessions and returns a live SellAuth URL (invoice left unpaid). (5) variant_id 999 -> 400 'no longer available'; omitted variant falls back to Basic. (6) TEST20 on [$14.99 bundle + Ultra Box pass] = subtotal 20.98 / eligible 14.99 / discount 3.00 / total 17.98 / excluded ['Weekly Event Ticket'] via API and on the checkout page. (7) Descriptions: multiline text saved through the admin form survives GET and renders with computed white-space: pre-line on card + modal; existing PokéLid description renders untruncated in the modal. (8) Modal opens from image, title and 'Full details'; event-pass warning shown; add-to-cart closes the modal on success and keeps it open with a toast when locked; usable/scrollable at 390px; Coming Soon shows detail-join-waitlist and no add button/dropdown. (9) Admin variants editor add/save/remove works, Fetch prefilled all 3 Weekly variants with correct ids/prices; categories/coupons/orders tabs and CHECK DIFFERENCES all work (sync-push-btn never clicked). Not tested (needs a real payment): order confirmation email item lines and admin/MyOrders/OrderDetail variant labels — code review shows the variant label is interpolated in all four places (server.py L782, Admin.jsx L235, MyOrders.jsx L38, OrderDetail.jsx L69).",
+  "rca_of_the_issue": "N/A — no functional defect reproduced. The two console warnings are non-blocking: the <option> hydration error comes from the dev visual-editor wrapping the option's dynamic text nodes in a <span>, and the Radix DialogContent warning is a missing aria-describedby."
+}

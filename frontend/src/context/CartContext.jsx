@@ -4,10 +4,14 @@ import { toast } from "sonner";
 const CartContext = createContext(null);
 const KEY = "pokeforge_cart";
 
+const lineKey = (productId, variantId) => `${productId}:${variantId || ""}`;
+
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(KEY)) || [];
+      const stored = JSON.parse(localStorage.getItem(KEY)) || [];
+      // Older carts predate variants and have no line key.
+      return stored.map((i) => ({ ...i, key: i.key || lineKey(i.id, i.variant_id) }));
     } catch {
       return [];
     }
@@ -25,7 +29,7 @@ export function CartProvider({ children }) {
     .reduce((n, i) => n + i.quantity, 0);
   const hasOther = items.some((i) => i.category !== "event_pass");
 
-  const add = (product) => {
+  const add = (product, variant = null) => {
     if (product.coming_soon) {
       toast.error(`${product.name} is not released yet.`);
       return false;
@@ -45,30 +49,35 @@ export function CartProvider({ children }) {
         return false;
       }
     }
+    const variantId = variant ? variant.sellauth_variant_id : null;
+    const key = lineKey(product.id, variantId);
     setItems((prev) => {
-      const found = prev.find((i) => i.id === product.id);
-      if (found) return prev.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+      if (prev.some((i) => i.key === key))
+        return prev.map((i) => (i.key === key ? { ...i, quantity: i.quantity + 1 } : i));
       return [
         ...prev,
         {
+          key,
           id: product.id,
           name: product.name,
-          price: product.price,
+          price: variant ? variant.price : product.price,
           category: product.category,
           image_url: product.image_url,
+          variant_id: variantId,
+          variant_label: variant ? variant.label : "",
           quantity: 1,
         },
       ];
     });
-    toast.success(`${product.name} added to cart`);
+    toast.success(`${product.name}${variant ? ` (${variant.label})` : ""} added to cart`);
     return true;
   };
 
-  const remove = (id) => setItems((prev) => prev.filter((i) => i.id !== id));
-  const setQty = (id, qty) =>
+  const remove = (key) => setItems((prev) => prev.filter((i) => i.key !== key));
+  const setQty = (key, qty) =>
     setItems((prev) =>
       prev.map((i) => {
-        if (i.id !== id) return i;
+        if (i.key !== key) return i;
         const cap = i.category === "event_pass" ? 1 : 50;
         return { ...i, quantity: Math.max(1, Math.min(cap, qty)) };
       })

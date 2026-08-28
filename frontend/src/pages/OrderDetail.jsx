@@ -66,7 +66,7 @@ export default function OrderDetail() {
           <div className="divide-y divide-zinc-900">
             {order.items.map((i) => (
               <div key={i.product_id} className="flex justify-between px-5 py-4 text-xs">
-                <span className="text-zinc-300">{i.name} <span className="text-zinc-600">× {i.quantity}</span></span>
+                <span className="text-zinc-300">{i.name}{i.variant_label ? ` — ${i.variant_label}` : ""} <span className="text-zinc-600">× {i.quantity}</span></span>
                 <span>{money(i.price * i.quantity)}</span>
               </div>
             ))}

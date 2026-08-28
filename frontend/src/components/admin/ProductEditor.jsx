@@ -18,6 +18,7 @@ const blank = {
   active: true,
   coming_soon: false,
   is_featured: false,
+  variants: [],
 };
 
 const toForm = (p) =>
@@ -35,6 +36,11 @@ const toForm = (p) =>
         active: p.active !== false,
         coming_soon: !!p.coming_soon,
         is_featured: !!p.is_featured,
+        variants: (p.variants || []).map((v) => ({
+          label: v.label,
+          sellauth_variant_id: v.sellauth_variant_id,
+          price: v.price,
+        })),
       };
 
 export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
@@ -47,12 +53,35 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
     if (!form.sellauth_product_id) return toast.error("Enter a SellAuth product ID first");
     try {
       const { data } = await api.get(`/admin/sellauth/products/${form.sellauth_product_id}`);
-      setForm((f) => ({ ...f, price: data.price, name: f.name || data.name }));
-      toast.success(`SellAuth: ${data.name} — $${data.price} (variant ${data.sellauth_variant_id})`);
+      setForm((f) => ({
+        ...f,
+        price: data.price,
+        name: f.name || data.name,
+        variants:
+          data.variants.length > 1 && f.variants.length === 0 ? data.variants : f.variants,
+      }));
+      toast.success(
+        `SellAuth: ${data.name} — $${data.price} · ${data.variants.length} variant(s) found`
+      );
     } catch (err) {
       toast.error(apiError(err));
     }
   };
+
+  const setVariant = (n, key) => (e) =>
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v, idx) => (idx === n ? { ...v, [key]: e.target.value } : v)),
+    }));
+
+  const addVariant = () =>
+    setForm((f) => ({
+      ...f,
+      variants: [...f.variants, { label: "", sellauth_variant_id: "", price: "" }],
+    }));
+
+  const removeVariant = (n) =>
+    setForm((f) => ({ ...f, variants: f.variants.filter((_, idx) => idx !== n) }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -69,6 +98,13 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
       active: form.active,
       coming_soon: form.coming_soon,
       is_featured: form.is_featured,
+      variants: form.variants
+        .filter((v) => v.label && v.sellauth_variant_id && v.price)
+        .map((v) => ({
+          label: v.label.trim(),
+          sellauth_variant_id: Number(v.sellauth_variant_id),
+          price: Number(v.price),
+        })),
     };
     try {
       if (product) await api.put(`/products/${product.id}`, payload);
@@ -120,10 +156,13 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
           <label className={label}>Description</label>
           <textarea
             data-testid="product-description-input"
-            className={`${input} h-24`}
+            className={`${input} h-40 font-mono leading-relaxed`}
             value={form.description}
             onChange={set("description")}
           />
+          <p className="mt-1.5 text-[10px] text-zinc-600">
+            Line breaks and blank lines are kept exactly as typed on the storefront.
+          </p>
         </div>
         <div>
           <label className={label}>SellAuth Product ID</label>
@@ -212,6 +251,64 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
               className="h-14 w-14 border border-zinc-800 object-cover"
             />
           )}
+        </div>
+      </div>
+
+      <div className="mt-6 border-t border-zinc-900 pt-5" data-testid="variants-editor">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-400">Variants / options</p>
+            <p className="mt-1 text-[10px] text-zinc-600">
+              Leave empty for a single-price product. With options, the card shows a dropdown and the
+              chosen SellAuth variant ID is what gets bought.
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="add-variant-btn"
+            onClick={addVariant}
+            className="border border-zinc-700 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-zinc-300 hover:border-[#00ffcc] hover:text-[#00ffcc]"
+          >
+            + Add option
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {form.variants.map((v, n) => (
+            <div key={n} data-testid={`variant-row-${n}`} className="grid gap-3 sm:grid-cols-[1fr_140px_120px_auto]">
+              <input
+                data-testid={`variant-label-input-${n}`}
+                className={input}
+                placeholder="Label (e.g. Ultra Box)"
+                value={v.label}
+                onChange={setVariant(n, "label")}
+              />
+              <input
+                data-testid={`variant-id-input-${n}`}
+                className={input}
+                placeholder="Variant ID"
+                value={v.sellauth_variant_id}
+                onChange={setVariant(n, "sellauth_variant_id")}
+              />
+              <input
+                data-testid={`variant-price-input-${n}`}
+                className={input}
+                type="number"
+                step="0.01"
+                placeholder="Price"
+                value={v.price}
+                onChange={setVariant(n, "price")}
+              />
+              <button
+                type="button"
+                data-testid={`remove-variant-${n}`}
+                onClick={() => removeVariant(n)}
+                className="border border-zinc-800 px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-zinc-500 hover:border-[#ff3b30] hover:text-[#ff3b30]"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
