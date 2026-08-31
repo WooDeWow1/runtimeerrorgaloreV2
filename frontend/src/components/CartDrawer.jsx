@@ -1,11 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Minus, Plus, Trash2 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { CouponField } from "@/components/CouponField";
 import { money } from "@/lib/api";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 export const CartDrawer = () => {
-  const { items, remove, setQty, total, invalid, open, setOpen } = useCart();
+  const { items, remove, setQty, total, discount, payable, invalid, open, setOpen } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   return (
@@ -89,9 +92,26 @@ export const CartDrawer = () => {
         </div>
 
         <div className="border-t border-zinc-800 px-6 py-5">
-          <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
+          {items.length > 0 && (
+            <div className="mb-5">
+              <CouponField testPrefix="cart" email={user?.email || ""} />
+            </div>
+          )}
+          {discount > 0 && (
+            <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
+              <span>Subtotal</span>
+              <span data-testid="cart-subtotal">{money(total)}</span>
+            </div>
+          )}
+          {discount > 0 && (
+            <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
+              <span>Discount</span>
+              <span data-testid="cart-discount" className="text-[#00ffcc]">−{money(discount)}</span>
+            </div>
+          )}
+          <div className="mt-3 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
             <span>Total</span>
-            <span data-testid="cart-total" className="font-display text-lg text-white">{money(total)}</span>
+            <span data-testid="cart-total" className="font-display text-lg text-white">{money(payable)}</span>
           </div>
           <button
             data-testid="checkout-btn"

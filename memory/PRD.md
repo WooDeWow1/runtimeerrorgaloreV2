@@ -199,6 +199,17 @@ production — run it after adding products, since ids differ per database.
 - Iteration 16: 45/45 backend tests and all frontend flows passed; the reported console/a11y nits
   (`<option>` child expression, missing DialogDescription) are fixed.
 
+## Coupon field in the cart drawer (2026-06)
+- The applied coupon now lives in `CartContext` (`coupon`, `applyCoupon`, `clearCoupon`, `discount`,
+  `payable`), so the cart drawer and the checkout page share one state — a code entered in the drawer
+  is still applied on /checkout and `coupon.code` is what goes to `POST /orders/checkout`, where the
+  server re-prices the cart and hands SellAuth the discounted total.
+- `components/CouponField.jsx` is the single shared input (testPrefix `cart` / `checkout`), styled to
+  match the neon checkout button. The drawer shows Subtotal / Discount / Total live, above
+  "Proceed to checkout".
+- Changing the cart re-validates the code against `/coupons/validate` and drops it with a toast if it
+  no longer qualifies (e.g. the minimum spend is no longer met). `clear()` also clears the coupon.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

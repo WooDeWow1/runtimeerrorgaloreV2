@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, apiError, money } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { CouponField } from "@/components/CouponField";
 
 const input =
   "w-full bg-black px-4 py-3 font-mono text-sm text-[#00ffcc] outline-none ring-1 ring-[#00ffcc]/30 transition-shadow focus:ring-[#00ffcc]";
@@ -12,7 +13,7 @@ const label = "mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500"
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { items, total, invalid } = useCart();
+  const { items, total, discount, payable, invalid, coupon, cartPayload } = useCart();
   const { user } = useAuth();
   const isGuest = !user;
   const [email, setEmail] = useState("");
@@ -21,41 +22,6 @@ export default function Checkout() {
   const [ptcPassword, setPtcPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [coupon, setCoupon] = useState("");
-  const [applied, setApplied] = useState(null);
-  const [couponBusy, setCouponBusy] = useState(false);
-
-  const cartPayload = items.map((i) => ({
-    product_id: i.id,
-    quantity: i.quantity,
-    ...(i.variant_id ? { variant_id: i.variant_id } : {}),
-  }));
-
-  const applyCoupon = async () => {
-    if (!coupon.trim()) return;
-    setCouponBusy(true);
-    try {
-      const { data } = await api.post("/coupons/validate", {
-        code: coupon.trim(),
-        items: cartPayload,
-        ...(isGuest && email ? { email } : {}),
-      });
-      setApplied(data);
-      toast.success(`${data.code} applied — you save ${money(data.discount)}`);
-    } catch (err) {
-      setApplied(null);
-      toast.error(apiError(err));
-    } finally {
-      setCouponBusy(false);
-    }
-  };
-
-  const removeCoupon = () => {
-    setApplied(null);
-    setCoupon("");
-  };
-
-  const payable = applied ? applied.total : total;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -69,7 +35,7 @@ export default function Checkout() {
         ptc_username: ptcUsername,
         ptc_password: ptcPassword,
         origin_url: window.location.origin,
-        ...(applied ? { coupon_code: applied.code } : {}),
+        ...(coupon ? { coupon_code: coupon.code } : {}),
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
@@ -202,61 +168,14 @@ export default function Checkout() {
           </div>
 
           <div className="mt-5 border-t border-zinc-800 pt-5">
-            <label className="mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500">
-              Discount code
-            </label>
-            <div className="flex gap-2">
-              <input
-                data-testid="coupon-input"
-                value={coupon}
-                onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-                placeholder="ENTER CODE"
-                disabled={!!applied}
-                className="w-full bg-[#050505] px-3 py-2 font-mono text-xs uppercase text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc] disabled:opacity-50"
-              />
-              {applied ? (
-                <button
-                  type="button"
-                  data-testid="remove-coupon-btn"
-                  onClick={removeCoupon}
-                  className="shrink-0 border border-zinc-700 px-4 text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white"
-                >
-                  Remove
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  data-testid="apply-coupon-btn"
-                  onClick={applyCoupon}
-                  disabled={couponBusy}
-                  className="shrink-0 border border-[#00ffcc] px-4 text-[10px] uppercase tracking-[0.2em] text-[#00ffcc] hover:bg-[#00ffcc] hover:text-black disabled:opacity-40"
-                >
-                  {couponBusy ? "…" : "Apply"}
-                </button>
-              )}
-            </div>
-            {applied ? (
-              <div data-testid="coupon-applied" className="mt-3 border border-[#00ffcc]/40 bg-[#00ffcc]/[0.06] p-3 text-[10px] leading-relaxed text-[#00ffcc]">
-                {applied.code} · −{money(applied.discount)}
-                {applied.excluded_names?.length > 0 && (
-                  <span className="mt-1 block text-zinc-500">
-                    Not discounted: {applied.excluded_names.join(", ")}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
-                Codes cannot be applied to Event Passes. In a mixed cart the discount applies to the
-                eligible items only.
-              </p>
-            )}
+            <CouponField testPrefix="checkout" email={isGuest ? email : ""} />
           </div>
 
-          {applied && (
+          {discount > 0 && (
             <div className="mt-5 flex justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
               <span>Discount</span>
               <span data-testid="checkout-discount" className="text-[#00ffcc]">
-                −{money(applied.discount)}
+                −{money(discount)}
               </span>
             </div>
           )}
