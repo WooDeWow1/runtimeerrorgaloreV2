@@ -204,6 +204,8 @@ production — run it after adding products, since ids differ per database.
   `payable`), so the cart drawer and the checkout page share one state — a code entered in the drawer
   is still applied on /checkout and `coupon.code` is what goes to `POST /orders/checkout`, where the
   server re-prices the cart and hands SellAuth the discounted total.
+- The chip, the DISCOUNT row and the apply toast show the **percentage** (`percent_label` from
+  `/coupons/validate`), never a dollar amount — fixed-$ codes show their effective % of the cart.
 - `components/CouponField.jsx` is the single shared input (testPrefix `cart` / `checkout`), styled to
   match the neon checkout button. The drawer shows Subtotal / Discount / Total live, above
   "Proceed to checkout".

@@ -591,12 +591,19 @@ def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
     total = round(
         sum((prices.get(line_key(i), i.price)) * i.quantity for i in items), 2
     )
+    percent_value = (
+        float(coupon["percent_off"])
+        if coupon.get("discount_type", "percent") == "percent" and coupon.get("percent_off")
+        else round((subtotal - total) / subtotal * 100, 1) if subtotal else 0
+    )
     return {
         "code": coupon["code"],
         "subtotal": subtotal,
         "eligible_subtotal": eligible_subtotal,
         "discount": round(subtotal - total, 2),
         "total": total,
+        "discount_type": coupon.get("discount_type", "percent"),
+        "percent_label": f"{percent_value:g}%",
         "unit_prices": prices,
         "excluded_names": [i.name for i in items if line_key(i) not in prices],
     }

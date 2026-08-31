@@ -175,7 +175,7 @@ export default function Checkout() {
             <div className="mt-5 flex justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
               <span>Discount</span>
               <span data-testid="checkout-discount" className="text-[#00ffcc]">
-                −{money(discount)}
+                −{coupon.percent_label}
               </span>
             </div>
           )}

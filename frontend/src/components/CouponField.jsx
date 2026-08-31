@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Tag, X } from "lucide-react";
 import { useCart } from "@/context/CartContext";
-import { money } from "@/lib/api";
 
 export const CouponField = ({ email = "", testPrefix = "cart" }) => {
   const { coupon, couponBusy, applyCoupon, clearCoupon } = useCart();
@@ -21,7 +20,7 @@ export const CouponField = ({ email = "", testPrefix = "cart" }) => {
       >
         <div className="flex items-center justify-between gap-3">
           <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.15em] text-[#00ffcc]">
-            <Tag className="h-3.5 w-3.5" /> {coupon.code} · −{money(coupon.discount)}
+            <Tag className="h-3.5 w-3.5" /> {coupon.code} · −{coupon.percent_label}
           </p>
           <button
             type="button"

@@ -7,7 +7,7 @@ import { money } from "@/lib/api";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 export const CartDrawer = () => {
-  const { items, remove, setQty, total, discount, payable, invalid, open, setOpen } = useCart();
+  const { items, remove, setQty, total, discount, payable, invalid, coupon, open, setOpen } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -106,7 +106,7 @@ export const CartDrawer = () => {
           {discount > 0 && (
             <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">
               <span>Discount</span>
-              <span data-testid="cart-discount" className="text-[#00ffcc]">−{money(discount)}</span>
+              <span data-testid="cart-discount" className="text-[#00ffcc]">−{coupon.percent_label}</span>
             </div>
           )}
           <div className="mt-3 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-400">

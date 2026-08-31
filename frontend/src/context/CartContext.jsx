@@ -111,7 +111,7 @@ export function CartProvider({ children }) {
         ...(email ? { email } : {}),
       });
       setCoupon(data);
-      toast.success(`${data.code} applied — you save ${money(data.discount)}`);
+      toast.success(`${data.code} applied — ${data.percent_label} off`);
       return true;
     } catch (err) {
       setCoupon(null);
