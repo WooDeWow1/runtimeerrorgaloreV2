@@ -196,6 +196,9 @@ production — run it after adding products, since ids differ per database.
 - Descriptions keep their line breaks everywhere: `whitespace-pre-line` on the card (clamped to 3
   lines as a teaser) and in the new `ProductDetailDialog`, which opens from the card image, title or
   "Full details" and shows the untruncated text plus the variant picker and Add to cart.
+- 2026-06: added GO Pass Deluxe: Mega Finale (864451, event_pass) with Basic 1570359 / + 10 Ranks
+  1570360 / Ultra Box 1570361; prices read live from SellAuth (10.99 / 114.99 / 18.99 — the middle
+  one looks like a dashboard typo, flagged to the user, NOT changed here).
 - Iteration 16: 45/45 backend tests and all frontend flows passed; the reported console/a11y nits
   (`<option>` child expression, missing DialogDescription) are fixed.
 

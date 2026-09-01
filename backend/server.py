@@ -1261,12 +1261,17 @@ EXTRA_PRODUCTS = [
     {"name": "LEGO PokéLid Stamp Rally", "category": "pokelid", "price": 24.99,
      "description": POKELID_DESCRIPTION, "image_url": "/images/legolid.jpg",
      "sellauth_product_id": 857690, "badge": "Stamp Rally"},
+    {"name": "GO Pass Deluxe: Mega Finale", "category": "event_pass", "price": 10.99,
+     "description": "Value Varies / 1x GO Pass Mega Finale\n\n"
+                    "Requires a Pokécoin bundle in cart to purchase!",
+     "image_url": "/images/go-pass.png", "sellauth_product_id": 864451, "badge": "Mega Finale"},
 ]
 
 
 SEED_VARIANTS = {
     851924: [(1508676, "Basic"), (1553265, "+ 6 Ranks"), (1553266, "Ultra Box")],
     851928: [(1508694, "Basic"), (1553263, "+10 Ranks"), (1553264, "Ultra Box")],
+    864451: [(1570359, "Basic"), (1570360, "+ 10 Ranks"), (1570361, "Ultra Box")],
 }
 
 
