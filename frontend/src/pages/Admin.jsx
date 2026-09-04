@@ -26,7 +26,26 @@ export default function Admin() {
   const [bannerBusy, setBannerBusy] = useState(false);
   const [waitlistQuery, setWaitlistQuery] = useState("");
   const [editingProduct, setEditingProduct] = useState(null); // null | "new" | product
+  const [unread, setUnread] = useState({ orders: 0, messages: 0 });
   const { categories, labelOf, reload: reloadCategories } = useCategories();
+
+  const loadUnread = () =>
+    api.get("/admin/unread").then(({ data }) => setUnread(data)).catch(() => {});
+
+  const openChat = async (orderId) => {
+    if (openOrder === orderId) {
+      setOpenOrder(null);
+      return;
+    }
+    setOpenOrder(orderId);
+    try {
+      await api.post(`/admin/orders/${orderId}/read`);
+      loadOrders();
+      loadUnread();
+    } catch {
+      /* reading is best-effort */
+    }
+  };
   const [sync, setSync] = useState(null);
   const [syncBusy, setSyncBusy] = useState(false);
 
@@ -96,6 +115,20 @@ export default function Admin() {
   useEffect(() => {
     loadOrders();
     loadProducts();
+    loadUnread();
+    const t = setInterval(loadUnread, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Deep link from the "New customer message" email: /admin?order=<id>
+  useEffect(() => {
+    const orderId = new URLSearchParams(window.location.search).get("order");
+    if (orderId) {
+      setTab("orders");
+      openChat(orderId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -212,11 +245,18 @@ export default function Admin() {
             key={t.key}
             data-testid={`admin-tab-${t.key}`}
             onClick={() => setTab(t.key)}
-            className={`border px-5 py-2 text-[10px] uppercase tracking-[0.25em] transition-colors ${
+            className={`relative border px-5 py-2 text-[10px] uppercase tracking-[0.25em] transition-colors ${
               tab === t.key ? "border-[#00ffcc] text-[#00ffcc]" : "border-zinc-800 text-zinc-500 hover:text-white"
             }`}
           >
             {t.label}
+            {t.key === "orders" && unread.orders > 0 && (
+              <span
+                data-testid="orders-tab-unread-dot"
+                title={`${unread.messages} unread customer message(s)`}
+                className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 animate-pulse rounded-full bg-[#39ff14] shadow-[0_0_8px_2px_rgba(57,255,20,0.7)]"
+              />
+            )}
           </button>
         ))}
       </div>
@@ -230,6 +270,15 @@ export default function Admin() {
                 <div>
                   <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
                     #{o.id.slice(-8)} · {o.user_email}
+                    {o.unread_count > 0 && (
+                      <span
+                        data-testid={`order-unread-badge-${o.id}`}
+                        className="ml-3 inline-flex items-center gap-1.5 rounded-full bg-[#39ff14]/15 px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-[#39ff14] shadow-[0_0_10px_rgba(57,255,20,0.35)]"
+                      >
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#39ff14]" />
+                        {o.unread_count} new
+                      </span>
+                    )}
                   </p>
                   <p className="mt-2 text-xs text-zinc-300">
                     {o.items.map((i) => `${i.name}${i.variant_label ? ` — ${i.variant_label}` : ""} ×${i.quantity}`).join(" · ")}
@@ -274,8 +323,12 @@ export default function Admin() {
                 )}
                 <button
                   data-testid={`toggle-chat-${o.id}`}
-                  onClick={() => setOpenOrder(openOrder === o.id ? null : o.id)}
-                  className="border border-zinc-800 px-3 py-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-400 hover:border-[#00ffcc] hover:text-[#00ffcc]"
+                  onClick={() => openChat(o.id)}
+                  className={`border px-3 py-1.5 text-[9px] uppercase tracking-[0.2em] transition-colors ${
+                    o.unread_count > 0
+                      ? "border-[#39ff14] text-[#39ff14]"
+                      : "border-zinc-800 text-zinc-400 hover:border-[#00ffcc] hover:text-[#00ffcc]"
+                  }`}
                 >
                   {openOrder === o.id ? "Hide chat" : "Open chat"}
                 </button>

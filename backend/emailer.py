@@ -109,6 +109,11 @@ def order_url(order: dict) -> str:
     return f"{_site_url()}/order/{order['id'] if 'id' in order else order['_id']}"
 
 
+def admin_order_url(order_id: str) -> str:
+    """Deep link that opens this order's chat in the admin console."""
+    return f"{_site_url()}/admin?order={order_id}"
+
+
 async def send_email(*, to: str, subject: str, html: str) -> str | None:
     _assert_safe_email(subject, html)
     payload = {
@@ -177,6 +182,16 @@ def support_reply_html(*, order_id: str, body: str, order_url: str) -> str:
         f'<blockquote style="margin:0;padding:14px 16px;border-left:3px solid #00e6b8;'
         f'background:#fafafa;font-size:14px;line-height:1.6;white-space:pre-wrap">{escape(body)}</blockquote>'
         + _button(order_url, "Open order chat")
+    )
+
+
+def customer_message_html(*, order_id: str, body: str, customer_email: str, admin_url: str) -> str:
+    return _wrap(
+        f'<h2 style="margin:0 0 14px;font-size:19px">New customer message — order {escape(order_id[-8:])}</h2>'
+        f'<p style="margin:0 0 14px;font-size:13px;color:#3f3f46">From {escape(customer_email)}</p>'
+        f'<blockquote style="margin:0;padding:14px 16px;border-left:3px solid #00e6b8;'
+        f'background:#fafafa;font-size:14px;line-height:1.6;white-space:pre-wrap">{escape(body)}</blockquote>'
+        + _button(admin_url, "Open in admin panel")
     )
 
 

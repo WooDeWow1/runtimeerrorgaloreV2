@@ -64,7 +64,15 @@ from security import (  # noqa: E402
 )
 import catalog_sync  # noqa: E402
 import sellauth  # noqa: E402
-from emailer import order_tracking_html, order_url, send_email, support_reply_html  # noqa: E402
+from emailer import (  # noqa: E402
+    admin_order_url,
+    customer_message_html,
+    order_tracking_html,
+    order_url,
+    send_email,
+    support_email,
+    support_reply_html,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -891,7 +899,41 @@ async def my_orders(user: dict = Depends(get_current_user)):
 async def all_orders(status: Optional[str] = None, admin: dict = Depends(get_admin_user)):
     query = {"status": status} if status else {}
     docs = await db.orders.find(query).sort("created_at", -1).to_list(500)
-    return [order_response(d) for d in docs]
+    orders = []
+    for doc in docs:
+        data = order_response(doc)
+        data["unread_count"] = await unread_for_order(doc)
+        orders.append(data)
+    return orders
+
+
+async def unread_for_order(order: dict) -> int:
+    """Customer messages that arrived after the admin last opened or answered this order."""
+    seen = order.get("admin_read_at") or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return await db.messages.count_documents({
+        "order_id": str(order["_id"]),
+        "sender_role": {"$ne": "admin"},
+        "created_at": {"$gt": seen},
+    })
+
+
+@api.get("/admin/unread")
+async def admin_unread(admin: dict = Depends(get_admin_user)):
+    """Totals for the sidebar dot: how many orders are waiting on a reply."""
+    docs = await db.orders.find({}, {"admin_read_at": 1}).to_list(500)
+    orders, messages = 0, 0
+    for doc in docs:
+        count = await unread_for_order(doc)
+        if count:
+            orders += 1
+            messages += count
+    return {"orders": orders, "messages": messages}
+
+
+@api.post("/admin/orders/{order_id}/read")
+async def mark_order_read(order_id: str, admin: dict = Depends(get_admin_user)):
+    await db.orders.update_one({"_id": oid(order_id)}, {"$set": {"admin_read_at": utc_now()}})
+    return {"ok": True}
 
 
 @api.get("/orders/{order_id}")
@@ -972,6 +1014,7 @@ async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] =
     )
     result = await db.messages.insert_one(msg.to_mongo())
     if role == "admin":
+        await db.orders.update_one({"_id": order["_id"]}, {"$set": {"admin_read_at": utc_now()}})
         await notify(order.get("user_id", ""), order_id, "New message from support", payload.body[:140])
         # Guests have no bell, so email is the only way they hear back.
         try:
@@ -986,6 +1029,21 @@ async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] =
             )
         except Exception as exc:
             logger.error("Support reply email failed for %s: %s", order_id, exc)
+    else:
+        # Ping the support inbox so an operator can jump straight into the order.
+        try:
+            await send_email(
+                to=support_email() or order["user_email"],
+                subject=f"New Customer Message - Order #{order_id[-8:]}",
+                html=customer_message_html(
+                    order_id=order_id,
+                    body=payload.body,
+                    customer_email=order.get("user_email", ""),
+                    admin_url=admin_order_url(order_id),
+                ),
+            )
+        except Exception as exc:
+            logger.error("Customer message alert failed for %s: %s", order_id, exc)
     msg.id = str(result.inserted_id)
     return msg.model_dump(by_alias=False)
 

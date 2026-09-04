@@ -215,6 +215,19 @@ production — run it after adding products, since ids differ per database.
 - Changing the cart re-validates the code against `/coupons/validate` and drops it with a toast if it
   no longer qualifies (e.g. the minimum spend is no longer met). `clear()` also clears the coupon.
 
+## Admin unread message alerts (2026-06)
+- `orders.admin_read_at` marks when an operator last opened or answered an order. `unread_for_order()`
+  counts customer messages newer than that. `GET /api/admin/orders` now returns `unread_count` per
+  order, `GET /api/admin/unread` returns `{orders, messages}` for the tab dot (polled every 15s), and
+  `POST /api/admin/orders/{id}/read` is fired when the admin opens a chat (sending a reply also marks
+  it read).
+- Admin UI: neon-green "N NEW" pill on the order row, the Open chat button turns green, and a pulsing
+  green dot sits on the Orders tab while anything is unanswered.
+- A customer message now emails `EMAIL_REPLY_TO` (support@pokecoins.cc) with subject
+  `New Customer Message - Order #<last 8>`, the message body and a deep link
+  `{PUBLIC_APP_URL}/admin?order=<id>` — the admin page reads `?order=` and opens that chat directly.
+  Send verified (202 Accepted). The send is wrapped in try/except so chat never fails on a mail error.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
