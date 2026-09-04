@@ -37,6 +37,7 @@ const toForm = (p) =>
         coming_soon: !!p.coming_soon,
         is_featured: !!p.is_featured,
         variants: (p.variants || []).map((v) => ({
+          uid: `${v.sellauth_variant_id}`,
           label: v.label,
           sellauth_variant_id: v.sellauth_variant_id,
           price: v.price,
@@ -77,7 +78,10 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
   const addVariant = () =>
     setForm((f) => ({
       ...f,
-      variants: [...f.variants, { label: "", sellauth_variant_id: "", price: "" }],
+      variants: [
+        ...f.variants,
+        { uid: crypto.randomUUID(), label: "", sellauth_variant_id: "", price: "" },
+      ],
     }));
 
   const removeVariant = (n) =>
@@ -275,7 +279,7 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
 
         <div className="mt-4 space-y-3">
           {form.variants.map((v, n) => (
-            <div key={n} data-testid={`variant-row-${n}`} className="grid gap-3 sm:grid-cols-[1fr_140px_120px_auto]">
+            <div key={v.uid} data-testid={`variant-row-${n}`} className="grid gap-3 sm:grid-cols-[1fr_140px_120px_auto]">
               <input
                 data-testid={`variant-label-input-${n}`}
                 className={input}

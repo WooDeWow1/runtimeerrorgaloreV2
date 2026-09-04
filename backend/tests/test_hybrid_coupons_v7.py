@@ -253,7 +253,7 @@ class TestCouponUpdateValidation:
     """KNOWN BUGS (iteration 15): PUT /admin/coupons skips the create-time guards."""
 
     def test_put_duplicate_code_should_be_400_not_500(self, admin, coupon_ids):
-        a = make_coupon(admin, coupon_ids, code="TEST_QA_DUPA", percent_off=10)
+        make_coupon(admin, coupon_ids, code="TEST_QA_DUPA", percent_off=10)
         b = make_coupon(admin, coupon_ids, code="TEST_QA_DUPB", percent_off=10)
         r = admin.put(f"{API}/admin/coupons/{b['id']}",
                       json={"code": "TEST_QA_DUPA", "discount_type": "percent", "percent_off": 10})

@@ -6,7 +6,6 @@ Covers:
   * GET /api/products?include_inactive=true admin gating (anon/customer 403, admin 200 superset)
 All mutated products are restored in teardown.
 """
-import os
 import uuid
 
 import pytest
@@ -20,8 +19,7 @@ with open("/app/frontend/.env") as f:
 assert BASE_URL, "REACT_APP_BACKEND_URL not configured"
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "officialwifi@icloud.com")
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 PRODUCT_FIELDS = ["name", "description", "category", "price", "msrp", "image_url",
                   "coins", "badge", "active", "coming_soon", "is_featured"]

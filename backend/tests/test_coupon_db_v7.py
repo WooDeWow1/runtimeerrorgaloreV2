@@ -1,7 +1,6 @@
 """DB-level checks that HTTP alone cannot cover: session pricing rows, max_uses exhaustion,
 one_per_customer redemption block."""
 import asyncio
-import os
 import re
 from pathlib import Path
 

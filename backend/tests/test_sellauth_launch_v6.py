@@ -22,8 +22,7 @@ if not base:
 BASE = base.rstrip("/") + "/api"
 ORIGIN = base.rstrip("/")
 
-ADMIN_EMAIL = "officialwifi@icloud.com"
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 CREATED_SESSIONS = []
 
@@ -188,6 +187,9 @@ class TestCartRules:
 
 
 # ---------------- Coupon passthrough / removed engine ----------------
+@pytest.mark.skip(reason="Obsolete: the local coupon engine was restored in iteration 15 "
+                         "(this site owns discounts). Live coverage lives in "
+                         "test_hybrid_coupons_v7.py / test_refactor_regression_v9.py")
 class TestCouponPassthrough:
     def test_coupon_code_accepted_and_session_created(self, client, products):
         coins = pick(products, "pokecoin_bundle")[0]

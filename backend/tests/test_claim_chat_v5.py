@@ -21,8 +21,7 @@ if not base:
     raise RuntimeError("REACT_APP_BACKEND_URL missing")
 BASE = base.rstrip("/") + "/api"
 
-ADMIN_EMAIL = "officialwifi@icloud.com"
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 
 def seed_order(email=None):

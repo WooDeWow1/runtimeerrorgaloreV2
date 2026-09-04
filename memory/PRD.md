@@ -228,6 +228,38 @@ production — run it after adding products, since ids differ per database.
   `{PUBLIC_APP_URL}/admin?order=<id>` — the admin page reads `?order=` and opens that chat directly.
   Send verified (202 Accepted). The send is wrapped in try/except so chat never fails on a mail error.
 
+## Code-review cleanup (2026-06)
+- Backend complexity split into named helpers, behaviour unchanged: `checkout` → `price_cart` +
+  `sellauth_cart`; `create_order_from_session` → `record_redemption` + `send_order_confirmation`;
+  `sellauth_webhook` → `webhook_signature_ok` + `read_invoice` + `find_session` + `invoice_is_paid`;
+  `compute_discount` → `assert_coupon_fits` + `discount_amount`; `sellauth.create_checkout` →
+  `_cart_line` + `_post_checkout` + `_checkout_error`; `catalog_sync.plan` → `_diff_plan` +
+  `_apply_creates` + `_apply_updates`. `POST /admin/orders/{id}/read` now 404s on an unknown id.
+- Test creds live in `tests/admin_creds.py` (reads ADMIN_EMAIL/ADMIN_PASSWORD from backend/.env);
+  no admin password literals remain in the suite. The 23 tests skipped as "coupon engine removed in
+  iteration 14" are re-enabled now the engine is back.
+- `Admin.jsx` 735 → ~265 lines: `components/admin/OrdersTab|ProductsTab|WaitlistTab|SettingsTab`.
+  Loaders are `useCallback`, effects list real deps, ProductEditor variant rows keyed by a stable
+  `uid`, PaymentSuccess holds `clear` in a ref so the poll never restarts.
+- StrictMode traps fixed after iteration 17: `openChat` does its mark-read OUTSIDE the `setOpenOrder`
+  updater (double invocation was swallowing it) and the `?order=` deep link sets rather than toggles,
+  guarded by a ref. Banner form is disabled until `GET /settings/banner` resolves so a fast save can
+  no longer wipe the live banner. Applying a coupon no longer double-posts `/coupons/validate`.
+- Deliberately NOT done (would be churn or a rewrite, flagged to the user): moving the JWT out of
+  localStorage into httpOnly cookies, the 32%→70% type-hint push, de-inlining framer-motion prop
+  objects, and the craco dev `console.warn`. Ruff reports zero F821/F632, so the review's "undefined
+  variables" and "`is` vs `==`" findings were false positives.
+
+- Iteration 17 follow-ups: re-enabling the 23 dormant coupon tests exposed stale expectations
+  (`coupon_code`→`code`, `excluded_items`→`excluded_names`, wording) — tests aligned to the current
+  contract, and `/coupons/validate` now also returns `percent_off`/`amount_off`. Coupon create/update
+  reject an unknown `excluded_categories` key. The all-excluded message now reads "does not apply to
+  any item in your cart — it cannot be used on Event Passes". Real bug found and fixed on the way:
+  `GET /admin/orders/{id}/credentials` 500'd on legacy rows whose ciphertext no longer decrypts; it
+  now returns "(unreadable — ask the customer in chat)" instead of crashing the admin panel.
+- Full suite green after the refactor: backend_test 89, hybrid_coupons 28, refactor_regression 25,
+  variants+coming_soon 26, claim_chat+product_update 24, coupon_db 3, sellauth_v6+auth_v2 31.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

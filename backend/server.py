@@ -18,7 +18,6 @@ from bson import ObjectId  # noqa: E402
 from bson.errors import InvalidId  # noqa: E402
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
-from pymongo.errors import DuplicateKeyError  # noqa: E402
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
 
 from models import (  # noqa: E402
@@ -49,7 +48,6 @@ from models import (  # noqa: E402
     ProductUpdate,
     RegisterRequest,
     StatusUpdate,
-    UserPublic,
     WaitlistIn,
     utc_now,
 )
@@ -567,10 +565,7 @@ def line_key(item: OrderItem) -> str:
     return f"{item.product_id}:{item.sellauth_variant_id or ''}"
 
 
-def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
-    subtotal = round(sum(i.price * i.quantity for i in items), 2)
-    eligible = [i for i in items if discount_eligible(i, coupon)]
-    eligible_subtotal = round(sum(i.price * i.quantity for i in eligible), 2)
+def assert_coupon_fits(coupon: dict, subtotal: float, eligible_subtotal: float) -> None:
     min_subtotal = coupon.get("min_subtotal")
     if min_subtotal and subtotal < float(min_subtotal):
         raise HTTPException(
@@ -580,25 +575,36 @@ def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
     if eligible_subtotal <= 0:
         raise HTTPException(
             status_code=400,
-            detail="This code cannot be used on Event Passes. Add an eligible item to save.",
+            detail="This code does not apply to any item in your cart — it cannot be used on "
+                   "Event Passes. Add an eligible item to save.",
         )
+
+
+def discount_amount(coupon: dict, eligible_subtotal: float) -> float:
     if coupon.get("discount_type", "percent") == "fixed":
-        discount = float(coupon.get("amount_off") or 0)
+        raw = float(coupon.get("amount_off") or 0)
     else:
-        discount = eligible_subtotal * float(coupon.get("percent_off") or 0) / 100
+        raw = eligible_subtotal * float(coupon.get("percent_off") or 0) / 100
     # Never discount below a chargeable amount.
-    discount = round(min(discount, max(eligible_subtotal - MIN_CHARGE, 0)), 2)
+    discount = round(min(raw, max(eligible_subtotal - MIN_CHARGE, 0)), 2)
     if discount <= 0:
         raise HTTPException(status_code=400, detail="That code gives no discount on this cart")
+    return discount
+
+
+def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
+    subtotal = round(sum(i.price * i.quantity for i in items), 2)
+    eligible = [i for i in items if discount_eligible(i, coupon)]
+    eligible_subtotal = round(sum(i.price * i.quantity for i in eligible), 2)
+    assert_coupon_fits(coupon, subtotal, eligible_subtotal)
+    discount = discount_amount(coupon, eligible_subtotal)
 
     # Spread the discount across eligible lines so SellAuth receives the exact final total.
     factor = (eligible_subtotal - discount) / eligible_subtotal
-    prices: dict[str, float] = {}
-    for item in eligible:
-        prices[line_key(item)] = max(round(item.price * factor, 2), 0.01)
-    total = round(
-        sum((prices.get(line_key(i), i.price)) * i.quantity for i in items), 2
-    )
+    prices: dict[str, float] = {
+        line_key(item): max(round(item.price * factor, 2), 0.01) for item in eligible
+    }
+    total = round(sum((prices.get(line_key(i), i.price)) * i.quantity for i in items), 2)
     percent_value = (
         float(coupon["percent_off"])
         if coupon.get("discount_type", "percent") == "percent" and coupon.get("percent_off")
@@ -611,6 +617,8 @@ def compute_discount(coupon: dict, items: List[OrderItem]) -> dict:
         "discount": round(subtotal - total, 2),
         "total": total,
         "discount_type": coupon.get("discount_type", "percent"),
+        "percent_off": coupon.get("percent_off"),
+        "amount_off": coupon.get("amount_off"),
         "percent_label": f"{percent_value:g}%",
         "unit_prices": prices,
         "excluded_names": [i.name for i in items if line_key(i) not in prices],
@@ -629,6 +637,17 @@ async def validate_coupon(payload: CouponValidateRequest, user: Optional[dict] =
     return result
 
 
+async def assert_coupon_payload(payload: CouponIn) -> None:
+    if payload.discount_type == "percent" and not payload.percent_off:
+        raise HTTPException(status_code=400, detail="Enter a percentage to take off")
+    if payload.discount_type == "fixed" and not payload.amount_off:
+        raise HTTPException(status_code=400, detail="Enter a dollar amount to take off")
+    known = await category_keys()
+    for key in payload.excluded_categories or []:
+        if key not in known:
+            raise HTTPException(status_code=400, detail=f"Unknown category: {key}")
+
+
 @api.get("/admin/coupons")
 async def list_coupons(admin: dict = Depends(get_admin_user)):
     docs = await db.coupons.find().sort("created_at", -1).to_list(200)
@@ -640,10 +659,7 @@ async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)
     code = payload.code.strip().upper()
     if await db.coupons.find_one({"code": code}):
         raise HTTPException(status_code=400, detail="That code already exists")
-    if payload.discount_type == "percent" and not payload.percent_off:
-        raise HTTPException(status_code=400, detail="Enter a percentage to take off")
-    if payload.discount_type == "fixed" and not payload.amount_off:
-        raise HTTPException(status_code=400, detail="Enter a dollar amount to take off")
+    await assert_coupon_payload(payload)
     coupon = Coupon(**{**payload.model_dump(), "code": code})
     result = await db.coupons.insert_one(coupon.to_mongo())
     doc = await db.coupons.find_one({"_id": result.inserted_id})
@@ -653,10 +669,7 @@ async def create_coupon(payload: CouponIn, admin: dict = Depends(get_admin_user)
 @api.put("/admin/coupons/{coupon_id}")
 async def update_coupon(coupon_id: str, payload: CouponIn, admin: dict = Depends(get_admin_user)):
     code = payload.code.strip().upper()
-    if payload.discount_type == "percent" and not payload.percent_off:
-        raise HTTPException(status_code=400, detail="Enter a percentage to take off")
-    if payload.discount_type == "fixed" and not payload.amount_off:
-        raise HTTPException(status_code=400, detail="Enter a dollar amount to take off")
+    await assert_coupon_payload(payload)
     clash = await db.coupons.find_one({"code": code, "_id": {"$ne": oid(coupon_id)}})
     if clash:
         raise HTTPException(status_code=400, detail="That code already exists")
@@ -676,6 +689,32 @@ async def delete_coupon(coupon_id: str, admin: dict = Depends(get_admin_user)):
     return {"ok": True}
 
 
+async def price_cart(items: List[OrderItem], coupon_code: Optional[str], email: str) -> dict:
+    """This site owns discounts: price the cart here, then hand SellAuth the final total."""
+    subtotal = round(sum(i.price * i.quantity for i in items), 2)
+    if not coupon_code:
+        return {"subtotal": subtotal, "total": subtotal, "discount": 0.0, "unit_prices": {}}
+    coupon = await load_coupon(coupon_code, email)
+    priced = compute_discount(coupon, items)
+    return {
+        "subtotal": subtotal,
+        "total": priced["total"],
+        "discount": priced["discount"],
+        "unit_prices": priced["unit_prices"],
+    }
+
+
+def sellauth_cart(items: List[OrderItem], unit_prices: dict) -> list[dict]:
+    """Discounted lines carry a custom price; everything else stays a catalog item."""
+    cart = []
+    for i in items:
+        entry = i.model_dump()
+        if line_key(i) in unit_prices:
+            entry["custom_price"] = unit_prices[line_key(i)]
+        cart.append(entry)
+    return cart
+
+
 @api.post("/orders/checkout")
 async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_optional_user)):
     if not payload.items:
@@ -688,28 +727,15 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     if not email:
         raise HTTPException(status_code=400, detail="An email address is required for guest checkout")
 
-    # This site owns discounts now: we price the cart, then hand SellAuth the final total.
-    subtotal = round(sum(i.price * i.quantity for i in items), 2)
     coupon_code = (payload.coupon_code or "").strip().upper() or None
-    total, discount, unit_prices = subtotal, 0.0, {}
-    if coupon_code:
-        coupon = await load_coupon(coupon_code, email)
-        priced = compute_discount(coupon, items)
-        total, discount, unit_prices = priced["total"], priced["discount"], priced["unit_prices"]
-
-    sellauth_items = []
-    for i in items:
-        entry = i.model_dump()
-        if line_key(i) in unit_prices:
-            entry["custom_price"] = unit_prices[line_key(i)]
-        sellauth_items.append(entry)
+    priced = await price_cart(items, coupon_code, email)
 
     # Nothing is written to `orders` yet: a spam-resistant temporary session with a 30 min TTL.
     session_doc = {
         "items": [i.model_dump() for i in items],
-        "total": total,
-        "subtotal": subtotal,
-        "discount": discount,
+        "total": priced["total"],
+        "subtotal": priced["subtotal"],
+        "discount": priced["discount"],
         "coupon_code": coupon_code,
         "user_id": user_id,
         "email": email,
@@ -725,14 +751,11 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
 
     try:
         checkout_data = await sellauth.create_checkout(
-            items=sellauth_items, email=email, session_id=session_id,
+            items=sellauth_cart(items, priced["unit_prices"]), email=email, session_id=session_id,
         )
-    except sellauth.SellAuthPlanError as exc:
-        await db.checkout_sessions.delete_one({"_id": result.inserted_id})
-        raise HTTPException(status_code=400, detail=str(exc))
     except sellauth.SellAuthError as exc:
-        await db.checkout_sessions.delete_one({"_id": result.inserted_id})
         # 4xx so the real reason reaches the buyer: proxies replace 5xx bodies with their own page.
+        await db.checkout_sessions.delete_one({"_id": result.inserted_id})
         raise HTTPException(status_code=400, detail=str(exc))
 
     await db.checkout_sessions.update_one(
@@ -744,6 +767,41 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
         "session_id": session_id,
         "invoice_id": checkout_data["invoice_id"],
     }
+
+
+async def record_redemption(session: dict, order_id: str) -> None:
+    """Count the coupon use only once the money actually landed."""
+    if not session.get("coupon_code"):
+        return
+    try:
+        await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
+        await db.coupon_redemptions.update_one(
+            {"code": session["coupon_code"], "email": session["email"].lower()},
+            {"$set": {"order_id": order_id, "redeemed_at": utc_now()}},
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.error("Could not record coupon redemption: %s", exc)
+
+
+async def send_order_confirmation(session: dict, order_id: str) -> None:
+    """A provider hiccup must never undo a paid order, so this swallows its errors."""
+    try:
+        await send_email(
+            to=session["email"],
+            subject=f"Payment received — track your {os.environ['EMAIL_FROM_NAME']} order",
+            html=order_tracking_html(
+                order_id=order_id,
+                tracking_url=order_url({"origin_url": session.get("origin_url", ""), "id": order_id}),
+                total=session["total"],
+                item_lines=[
+                    f"{i['name']}{' — ' + i['variant_label'] if i.get('variant_label') else ''} x{i['quantity']}"
+                    for i in session["items"]
+                ],
+            ),
+        )
+    except Exception as exc:
+        logger.error("Order confirmation email failed for %s: %s", order_id, exc)
 
 
 async def create_order_from_session(session: dict) -> Optional[str]:
@@ -767,40 +825,13 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     )
     result = await db.orders.insert_one(order.to_mongo())
     order_id = str(result.inserted_id)
-    if session.get("coupon_code"):
-        try:
-            await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
-            await db.coupon_redemptions.update_one(
-                {"code": session["coupon_code"], "email": session["email"].lower()},
-                {"$set": {"order_id": order_id, "redeemed_at": utc_now()}},
-                upsert=True,
-            )
-        except Exception as exc:
-            logger.error("Could not record coupon redemption: %s", exc)
+    await record_redemption(session, order_id)
     await db.checkout_sessions.update_one(
         {"_id": session["_id"]}, {"$set": {"status": "paid", "order_id": order_id}}
     )
     await notify(session.get("user_id", ""), order_id, "Order received",
                  "Payment confirmed. Your order is queued — an operator will pick it up shortly.")
-
-    tracking_url = order_url({"origin_url": session.get("origin_url", ""), "id": order_id})
-    # A provider hiccup must never undo a paid order.
-    try:
-        await send_email(
-            to=session["email"],
-            subject=f"Payment received — track your {os.environ['EMAIL_FROM_NAME']} order",
-            html=order_tracking_html(
-                order_id=order_id,
-                tracking_url=tracking_url,
-                total=session["total"],
-                item_lines=[
-                    f"{i['name']}{' — ' + i['variant_label'] if i.get('variant_label') else ''} x{i['quantity']}"
-                    for i in session["items"]
-                ],
-            ),
-        )
-    except Exception as exc:
-        logger.error("Order confirmation email failed for %s: %s", order_id, exc)
+    await send_order_confirmation(session, order_id)
     return order_id
 
 
@@ -811,27 +842,24 @@ def verify_webhook_signature(raw: bytes, signature: Optional[str]) -> bool:
     return hmac.compare_digest(expected, signature.strip().lower())
 
 
-@app.post("/api/webhooks/sellauth")
-async def sellauth_webhook(request: Request):
-    raw = await request.body()
+def webhook_signature_ok(raw: bytes, request: Request) -> bool:
     signature = (
         request.headers.get("signature")
         or request.headers.get("x-signature")
         or request.headers.get("x-sellauth-signature")
     )
-    secret_ok = verify_webhook_signature(raw, signature)
-    if not secret_ok and request.query_params.get("secret") != SELLAUTH_WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid signature")
+    if verify_webhook_signature(raw, signature):
+        return True
+    return request.query_params.get("secret") == SELLAUTH_WEBHOOK_SECRET
 
-    try:
-        payload = await request.json()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
 
+def read_invoice(payload: dict) -> tuple[dict, str, Optional[str]]:
+    """SellAuth nests the invoice differently per event, so normalise it here."""
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else payload
     if isinstance(payload.get("data"), dict) and not invoice.get("id"):
         invoice = payload["data"]
     invoice_id = str(invoice.get("id") or invoice.get("invoice_id") or "")
+
     custom = invoice.get("custom_fields") or payload.get("custom_fields") or {}
     session_id = custom.get("checkout_session_id") if isinstance(custom, dict) else None
     meta = invoice.get("metadata") or payload.get("metadata")
@@ -839,35 +867,62 @@ async def sellauth_webhook(request: Request):
         session_id = meta.get("checkout_session_id")
     if not session_id and isinstance(meta, list) and meta:
         session_id = str(meta[0])
+    return invoice, invoice_id, session_id
 
-    event_key = f"{invoice_id}:{hashlib.sha256(raw).hexdigest()}"
-    if await db.webhook_events.find_one({"event_key": event_key}):
-        return {"ok": True, "duplicate": True}
 
-    session = None
+async def find_session(session_id: Optional[str], invoice_id: str) -> Optional[dict]:
     if session_id:
         try:
             session = await db.checkout_sessions.find_one({"_id": oid(session_id)})
         except HTTPException:
             session = None
-    if session is None and invoice_id:
-        session = await db.checkout_sessions.find_one({"invoice_id": invoice_id})
+        if session:
+            return session
+    if invoice_id:
+        return await db.checkout_sessions.find_one({"invoice_id": invoice_id})
+    return None
+
+
+async def invoice_is_paid(invoice: dict, invoice_id: str) -> bool:
+    """Trust the payload, but re-read from SellAuth before rejecting a payment."""
+    if sellauth.is_paid(invoice):
+        return True
+    if not invoice_id:
+        return False
+    fresh = await sellauth.get_invoice(invoice_id)
+    return bool(fresh and sellauth.is_paid(fresh))
+
+
+@app.post("/api/webhooks/sellauth")
+async def sellauth_webhook(request: Request):
+    raw = await request.body()
+    if not webhook_signature_ok(raw, request):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    invoice, invoice_id, session_id = read_invoice(payload)
+
+    event_key = f"{invoice_id}:{hashlib.sha256(raw).hexdigest()}"
+    if await db.webhook_events.find_one({"event_key": event_key}):
+        return {"ok": True, "duplicate": True}
+
+    session = await find_session(session_id, invoice_id)
     if session is None:
         logger.warning("SellAuth webhook for unknown session/invoice %s", invoice_id)
         return {"ok": True, "matched": False}
 
-    paid = sellauth.is_paid(invoice)
-    if not paid and invoice_id:
-        fresh = await sellauth.get_invoice(invoice_id)
-        paid = bool(fresh and sellauth.is_paid(fresh))
-    if not paid:
+    if not await invoice_is_paid(invoice, invoice_id):
         return {"ok": True, "paid": False}
 
     order_id = await create_order_from_session(session)
     try:
         await db.webhook_events.insert_one({"event_key": event_key, "received_at": utc_now()})
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.info("Webhook replay guard not stored for %s: %s", invoice_id, exc)
     return {"ok": True, "paid": True, "order_id": order_id}
 
 
@@ -932,7 +987,9 @@ async def admin_unread(admin: dict = Depends(get_admin_user)):
 
 @api.post("/admin/orders/{order_id}/read")
 async def mark_order_read(order_id: str, admin: dict = Depends(get_admin_user)):
-    await db.orders.update_one({"_id": oid(order_id)}, {"$set": {"admin_read_at": utc_now()}})
+    result = await db.orders.update_one({"_id": oid(order_id)}, {"$set": {"admin_read_at": utc_now()}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Order not found")
     return {"ok": True}
 
 
@@ -952,9 +1009,20 @@ async def reveal_credentials(order_id: str, admin: dict = Depends(get_admin_user
     doc = await db.orders.find_one({"_id": oid(order_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    def safe_decrypt(token: Optional[str]) -> str:
+        """Legacy/seeded rows can hold unreadable ciphertext: say so instead of 500ing."""
+        if not token:
+            return "(not provided)"
+        try:
+            return decrypt_secret(token)
+        except Exception as exc:
+            logger.warning("Could not decrypt credentials for order %s: %s", order_id, exc)
+            return "(unreadable — ask the customer in chat)"
+
     return {
-        "ptc_username": decrypt_secret(doc["ptc_username_enc"]),
-        "ptc_password": decrypt_secret(doc["ptc_password_enc"]),
+        "ptc_username": safe_decrypt(doc.get("ptc_username_enc")),
+        "ptc_password": safe_decrypt(doc.get("ptc_password_enc")),
     }
 
 

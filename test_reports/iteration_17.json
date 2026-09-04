@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 17 regression sweep over the pure code-quality refactor (backend helper extraction + Admin.jsx split). Backend: ran every pytest file one at a time (auth_playbook_v2/v7, variants_v8, hybrid_coupons_v7, coupon_db_v7, coming_soon_v3, product_update_v4, claim_chat_v5, sellauth_launch_v6, backend_test.py) plus a NEW 25-case file test_refactor_regression_v9.py that targets the extracted helpers (price_cart/sellauth_cart, compute_discount/assert_coupon_fits/discount_amount, webhook_signature_ok/read_invoice/find_session/invoice_is_paid, record_redemption/create_order_from_session, unread_for_order/admin_unread/mark_order_read, catalog_sync diff). All backend behaviour is unchanged: TEST20 maths exactly 20.98/14.99/3.00/17.98/'20%'/['Weekly Event Ticket'], every coupon rejection message, fixed-$ effective percent_label, full-price + coupon checkout writing subtotal/discount/total (unpaid live SellAuth invoices only, never paid), webhook 401 / ?secret= fallback / duplicate / matched:false / paid:false / paid promotion with used_count+1 + coupon_redemptions + email attempt, variant 400 + variant_label pass-through, admin-only sync diff. Frontend: all six admin tabs render and work after the split (products CRUD incl. variant add/remove with correct uid keying, star, coming-soon, sync diff, categories add/rename/move/delete, coupons create/edit/delete, waitlist search + CSV, banner save, password form, analytics + refresh), storefront filter tabs / variant dropdown / detail modal (white-space: pre-line) / cart coupon apply-reprice-remove / carry-through to /checkout / Event Pass rules, and PaymentSuccess polls to 'Payment confirmed' without restarting when the cart clears (6 polls, stopped after paid). TWO refactor regressions found in Admin.jsx openChat.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/orders/{id}/read", "issue": "Returns {ok:true} for a non-existent order id (update_one matched_count is never checked) — should 404."},
+      {"endpoint": "tests/backend_test.py", "issue": "23 tests are still skipped with the obsolete reason 'Local coupon engine removed in iteration 14'; the engine came back in iteration 15, so that coverage (incl. the webhook coupon-redemption test) is dormant and should be re-enabled."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Admin.jsx openChat", "issue": "REGRESSION: clicking 'Open chat' never calls POST /api/admin/orders/{id}/read — verified 0 read requests across 3 open/close clicks — so the green '<n> new' badge and the orders-tab neon dot never clear from the UI. The mark-read side effect sits inside the setOpenOrder updater, so the `opened` flag it sets is clobbered by React 18 StrictMode's double invocation and the function returns early.", "selector": "[data-testid=\"toggle-chat-<orderId>\"] / [data-testid=\"order-unread-badge-<orderId>\"] / [data-testid=\"orders-tab-unread-dot\"]", "priority": "HIGH"},
+      {"component": "Admin.jsx deep-link effect", "issue": "REGRESSION: /admin?order=<id> no longer opens that order's chat. The effect calls the toggling openChat and, because the effect runs twice under StrictMode, the chat opens and immediately closes (button stays 'Open chat', no chat panel). The read POST does fire on the first pass, so the badge clears — i.e. the operator loses the badge without ever seeing the message.", "selector": "[data-testid=\"toggle-chat-<orderId>\"]", "priority": "HIGH"},
+      {"component": "admin/SettingsTab banner form", "issue": "The banner inputs are editable before GET /settings/banner resolves, so a save issued in that window persists an empty message and wipes the live banner (I hit this during testing and restored the text to 'WELCOME! - USE CODE \"GOFEST\" AT CHECKOUT FOR 5% OFF!' — the banner renders uppercase so the original letter-casing could not be recovered; please confirm). Suggest disabling the form / showing a loader until the banner query resolves.", "selector": "[data-testid=\"banner-text-input\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Cart coupon", "issue": "Applying a code fires POST /api/coupons/validate twice (applyCoupon, then the CartContext re-validation effect because couponCode just changed). Harmless but one wasted round-trip per apply.", "affected_selectors": ["[data-testid=\"cart-apply-coupon-btn\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Cart drawer + /checkout summary", "issues": ["The DISCOUNT row shows the percent label ('−20%') instead of the dollar amount saved (−$3.00); subtotal and total are correct. Pre-existing, cosmetic."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_regression_v9.py",
+    "/app/backend/tests/qa_it17_seed.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_sellauth_launch_v6.py"
+  ],
+  "action_items": [
+    "Admin.jsx: move the mark-read side effect out of the setOpenOrder updater — e.g. `const isOpen = openOrder === orderId; setOpenOrder(isOpen ? null : orderId); if (isOpen) return; await api.post(.../read); loadOrders(); loadUnread();` (keep openOrder in the useCallback deps or hold it in a ref).",
+    "Admin.jsx: make the /admin?order=<id> effect set (not toggle) the open order and guard it with a ref so StrictMode's second effect pass cannot close the chat again.",
+    "admin/SettingsTab: block/disable the banner form until GET /settings/banner has resolved so a fast save cannot wipe the message; confirm the restored banner text casing.",
+    "server.py mark_order_read: 404 when the order id does not exist.",
+    "tests/backend_test.py: drop the four obsolete `@pytest.mark.skip(reason=\"Local coupon engine removed in iteration 14\")` markers (23 tests) now that the local engine is back."
+  ],
+  "critical_code_review_comments": [
+    "Admin.jsx openChat is impure: it assigns to a closure variable inside a useState updater. React explicitly requires updaters to be pure — this is the root cause of both admin regressions and it silently kills the unread-alert feature in dev.",
+    "server.py is 1451 lines — past the 700-line guideline. The helper extraction improved the functions, but the file itself should be split (coupons, orders/webhook, admin, catalog) next.",
+    "backend/tests/admin_creds.py correctly reads ADMIN_EMAIL/ADMIN_PASSWORD from backend/.env and raises when missing — no hardcoded credentials remain in the suite; every test file imports it and passes.",
+    "PaymentSuccess.jsx keeping `clear` in a ref works as intended (poll never restarts and stops once paid), and ProductEditor's uid-keyed variant rows survive a mid-list removal (removing row 0 left 'QA Large'/7.25 intact)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_refactor_regression_v9.py (new, 25 cases)",
+    "/app/backend/tests/qa_it17_seed.py (new seed/teardown helper)",
+    "/app/backend/tests/backend_test.py (stale category allowlist -> reads GET /api/categories; 'pokelid' was failing)",
+    "/app/backend/tests/test_sellauth_launch_v6.py (TestCouponPassthrough skipped as obsolete — it asserted the coupon endpoints were removed, which iteration 15 reverted)"
+  ],
+  "success_rate": {"backend": "100% (25/25 new; 66+23skip backend_test, 28 hybrid, 12 variants, 5+11 auth, 14 chat, 14 coming-soon, 10 product-update, 20+6skip sellauth-v6 — all pass)", "frontend": "~90% (2 HIGH admin unread/deep-link regressions; everything else verified)"},
+  "seed_data_creation": "All test data removed. Created and deleted: 1 paid order + customer message (qa_it17_seed.py), 1 PaymentSuccess session/order, TEST_IT17 QA Product (with 2 variants), category 'TEST IT17 Cat', coupons TESTIT17CODE / QAIT17*/QAOPC*/QAFIX*/QAWHK*, plus checkout sessions from the two real (unpaid, never paid) SellAuth checkouts. Verified 0 leftovers in mongo. Side effects left behind: order 6a8a8b26c150d787cdf8ebe6 and 6a831e6392c0bf2a339245c3 were marked admin-read (unread total 7 -> 6) and one order's status was flipped to processing and back to pending.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md, matches backend/.env). Emails must go to delivered@resend.dev; the provider 422s support@pokecoins.cc ('undeliverable recipient') and 429s under test volume — the code swallows both, so no order/message flow breaks.",
+  "context_for_next_testing_agent": "Run backend files one at a time (pytest.ini forces -n 2). New file: tests/test_refactor_regression_v9.py (25 cases, self-cleaning fixture) — it is the fastest full regression for the refactored helpers. backend_test.py must be run with -n 0: two of its tests (TestCheckoutValidation session-count deltas and the coming_soon mixed-cart guard) are flaky under xdist because other workers create/flag products concurrently; both pass serially. Admin UI notes: tab buttons are admin-tab-<key>; order rows admin-order-<id> with toggle-chat-<id>, reveal-creds-<id>, set-status-<s>-<id>, order-unread-badge-<id>; window.confirm handlers need asyncio.ensure_future(d.accept()); PaymentSuccess route is /payment/success?session_id=<id> (NOT /payment-success) and a paid state can be simulated with fetch('/api/webhooks/sellauth?secret=<SELLAUTH_WEBHOOK_SECRET>') from page.evaluate. Never click sync-push-btn and never pay a SellAuth invoice. When re-testing the two admin regressions, assert the actual POST /admin/orders/<id>/read request fires (page.on('request')) — the button label changes even when the read call does not happen.",
+  "rca_of_the_issue": "Admin.jsx openChat performs its side effect based on a variable assigned INSIDE the setOpenOrder updater: `setOpenOrder(prev => { opened = prev !== orderId; return opened ? orderId : null; })`. React 18 StrictMode double-invokes state updaters in dev, and the second invocation sees the already-updated state, so `opened` ends up false and `if (!opened) return;` short-circuits before POST /admin/orders/{id}/read — proven by instrumenting network traffic: 3 open/close clicks produced 0 read requests while the button label toggled correctly. The same impurity breaks the /admin?order=<id> deep link: the StrictMode double-mounted effect calls the toggling openChat twice, so the chat opens on the first pass (which does fire the read, clearing the badge) and closes on the second. Fix = compute the open/closed decision from state (or a ref) outside the updater and make the deep link set rather than toggle, guarded by a ref."
+}

@@ -7,7 +7,6 @@ Covers:
   * No _id leakage in product payloads
 Every product mutated by these tests is restored to its original state in teardown.
 """
-import os
 from pathlib import Path
 
 import pytest
@@ -24,8 +23,7 @@ with open("/app/frontend/.env") as f:
 assert BASE_URL, "REACT_APP_BACKEND_URL not configured"
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "officialwifi@icloud.com")
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 CHECKOUT_CREDS = {
     "ptc_username": "qa_ptc_user",

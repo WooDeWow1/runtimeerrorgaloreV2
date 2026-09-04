@@ -38,8 +38,7 @@ assert BASE_URL, "REACT_APP_BACKEND_URL not configured"
 
 API = f"{BASE_URL}/api"
 LOCAL_API = "http://localhost:8001/api"  # for webhook (some ingresses strip signature header)
-ADMIN_EMAIL = "officialwifi@icloud.com"
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 WEBHOOK_SECRET = os.environ["SELLAUTH_WEBHOOK_SECRET"]
 TTL_MIN = int(os.environ.get("CHECKOUT_SESSION_TTL_MINUTES", "30"))
 
@@ -723,7 +722,8 @@ class TestStardustVisibility:
             assert p.get("active", True) is True, f"{p['name']} not active"
 
     def test_all_category_keys_are_lowercase_snake_case(self):
-        allowed = {"pokecoin_bundle", "event_pass", "medals", "stardust", "shundo_service"}
+        # Categories are admin-managed now, so read the live list instead of hardcoding it.
+        allowed = {c["key"] for c in requests.get(f"{API}/categories").json()}
         for p in _products():
             assert p["category"] in allowed, f"Invalid category on {p['name']}: {p['category']}"
             assert p["category"] == p["category"].lower()
@@ -848,7 +848,6 @@ def _coupon_payload(code=None, **overrides):
     return payload
 
 
-@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponAdminCrud:
     def test_list_requires_admin(self, customer):
         assert requests.get(f"{API}/admin/coupons").status_code == 401
@@ -935,7 +934,6 @@ class TestCouponAdminCrud:
 
 
 # ---------------- Coupon validation endpoint (iteration 8) ----------------
-@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponValidation:
     @pytest.fixture
     def coupon_20(self, admin_token):
@@ -954,12 +952,12 @@ class TestCouponValidation:
         })
         assert r.status_code == 200, r.text
         data = r.json()
-        assert data["coupon_code"] == coupon_20["code"]
+        assert data["code"] == coupon_20["code"]
         assert data["percent_off"] == 20
         assert data["subtotal"] == round(bundle["price"], 2)
         assert data["discount"] == round(bundle["price"] * 0.2, 2)
         assert data["total"] == round(data["subtotal"] - data["discount"], 2)
-        assert data["excluded_items"] == []
+        assert data["excluded_names"] == []
 
     def test_case_insensitive_code(self, coupon_20):
         bundle = _find("pokecoin_bundle")
@@ -967,7 +965,7 @@ class TestCouponValidation:
             "code": coupon_20["code"].lower(),
             "items": [{"product_id": bundle["id"], "quantity": 1}],
         })
-        assert r.status_code == 200 and r.json()["coupon_code"] == coupon_20["code"]
+        assert r.status_code == 200 and r.json()["code"] == coupon_20["code"]
 
     def test_unknown_code_400(self):
         bundle = _find("pokecoin_bundle")
@@ -1022,7 +1020,7 @@ class TestCouponValidation:
                 "code": code, "items": [{"product_id": bundle["id"], "quantity": 1}],
             })
             assert r2.status_code == 400
-            assert "usage limit" in r2.json()["detail"].lower()
+            assert "fully redeemed" in r2.json()["detail"].lower()
         finally:
             requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
 
@@ -1043,7 +1041,6 @@ class TestCouponValidation:
 
 
 # ---------------- Coupon exclusions (iteration 8) ----------------
-@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponExclusions:
     def test_category_exclusion_all_excluded_400(self, admin_token):
         code = f"CATX{uuid.uuid4().hex[:5].upper()}"
@@ -1087,7 +1084,7 @@ class TestCouponExclusions:
             assert data["eligible_subtotal"] == expected_eligible
             assert data["discount"] == expected_discount
             assert data["total"] == round(expected_subtotal - expected_discount, 2)
-            assert stardust["name"] in data["excluded_items"]
+            assert stardust["name"] in data["excluded_names"]
         finally:
             requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
 
@@ -1100,6 +1097,8 @@ class TestCouponExclusions:
         for p in products:
             by_cat.setdefault(p["category"], []).append(p)
         for cat, plist in by_cat.items():
+            if cat == "event_pass":
+                continue
             if len(plist) >= 2:
                 same_cat_pair = (plist[0], plist[1])
                 break
@@ -1124,8 +1123,8 @@ class TestCouponExclusions:
             })
             assert r2.status_code == 200, r2.text
             data = r2.json()
-            assert excluded["name"] in data["excluded_items"]
-            assert eligible_same_cat["name"] not in data["excluded_items"]
+            assert excluded["name"] in data["excluded_names"]
+            assert eligible_same_cat["name"] not in data["excluded_names"]
             expected_eligible = round(eligible_same_cat["price"], 2)
             assert data["eligible_subtotal"] == expected_eligible
             assert data["discount"] == round(expected_eligible * 0.10, 2)
@@ -1134,7 +1133,6 @@ class TestCouponExclusions:
 
 
 # ---------------- Coupon at checkout (iteration 8) ----------------
-@pytest.mark.skip(reason="Local coupon engine removed in iteration 14 — SellAuth owns coupons now")
 class TestCouponCheckout:
     def test_checkout_applies_discount_server_side_and_stores_on_session(self, admin_token, customer):
         code = f"CO{uuid.uuid4().hex[:5].upper()}"

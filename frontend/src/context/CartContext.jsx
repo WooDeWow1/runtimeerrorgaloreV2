@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, apiError, money } from "@/lib/api";
 
@@ -20,6 +20,7 @@ export function CartProvider({ children }) {
   const [open, setOpen] = useState(false);
   const [coupon, setCoupon] = useState(null);
   const [couponBusy, setCouponBusy] = useState(false);
+  const validated = useRef("");
 
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(items));
@@ -110,6 +111,8 @@ export function CartProvider({ children }) {
         items: cartPayload,
         ...(email ? { email } : {}),
       });
+      // Already priced against this exact cart: skip the re-validation effect.
+      validated.current = `${trimmed}|${JSON.stringify(cartPayload)}`;
       setCoupon(data);
       toast.success(`${data.code} applied — ${data.percent_label} off`);
       return true;
@@ -124,29 +127,33 @@ export function CartProvider({ children }) {
 
   const clearCoupon = () => setCoupon(null);
 
+  const couponCode = coupon?.code;
+
   // The cart changed: re-price the applied code (it may now be invalid, e.g. under the minimum).
   useEffect(() => {
-    if (!coupon) return;
+    if (!couponCode) return;
     if (items.length === 0) {
       setCoupon(null);
       return;
     }
     let stale = false;
+    const signature = `${couponCode}|${JSON.stringify(cartPayload)}`;
+    if (validated.current === signature) return;
+    validated.current = signature;
     api
-      .post("/coupons/validate", { code: coupon.code, items: cartPayload })
+      .post("/coupons/validate", { code: couponCode, items: cartPayload })
       .then(({ data }) => {
         if (!stale) setCoupon(data);
       })
       .catch((err) => {
         if (stale) return;
         setCoupon(null);
-        toast.error(`${coupon.code} removed`, { description: apiError(err) });
+        toast.error(`${couponCode} removed`, { description: apiError(err) });
       });
     return () => {
       stale = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartPayload]);
+  }, [cartPayload, couponCode, items.length]);
 
   const total = useMemo(
     () => items.reduce((sum, i) => sum + i.price * i.quantity, 0),

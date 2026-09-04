@@ -17,6 +17,9 @@ export default function PaymentSuccess() {
   const { clear } = useCart();
   const { user } = useAuth();
   const cleared = useRef(false);
+  // Kept in a ref so clearing the cart never restarts the payment poll.
+  const clearCart = useRef(clear);
+  clearCart.current = clear;
 
   useEffect(() => {
     if (!orderId) return;
@@ -42,7 +45,7 @@ export default function PaymentSuccess() {
           setState("paid");
           if (!cleared.current) {
             cleared.current = true;
-            clear();
+            clearCart.current();
             localStorage.removeItem("pokeforge_checkout_url");
             localStorage.setItem(
               "pokeforge_guest_orders",
@@ -68,7 +71,6 @@ export default function PaymentSuccess() {
     };
     poll();
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   return (

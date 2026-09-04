@@ -62,23 +62,55 @@ async def _target_products(client, base, token) -> list:
     return resp.json()
 
 
+def _diff_plan(source: list[dict], target: list[dict]) -> tuple[list, list]:
+    by_name = {p["name"]: p for p in target}
+    creates, updates = [], []
+    for p in source:
+        dst = by_name.get(p["name"])
+        if not dst:
+            creates.append({"name": p["name"], "category": p.get("category"), "price": p.get("price")})
+            continue
+        diff = _differences(p, dst)
+        if diff:
+            updates.append({"name": p["name"], "id": dst["id"], "changes": diff})
+    return creates, updates
+
+
+async def _set_featured(client, base, headers, product_id, is_featured: bool) -> None:
+    await client.patch(f"{base}/api/products/{product_id}/featured",
+                       json={"is_featured": bool(is_featured)}, headers=headers)
+
+
+async def _apply_creates(client, base, headers, creates, src_by_name, errors) -> None:
+    for c in creates:
+        p = src_by_name[c["name"]]
+        resp = await client.post(f"{base}/api/products", json=_payload(p), headers=headers)
+        if resp.status_code >= 400:
+            errors.append(f"create {p['name']}: {resp.status_code} {resp.text[:160]}")
+            continue
+        if p.get("is_featured"):
+            await _set_featured(client, base, headers, resp.json()["id"], True)
+
+
+async def _apply_updates(client, base, headers, updates, src_by_name, errors) -> None:
+    for u in updates:
+        p = src_by_name[u["name"]]
+        body = {k: p.get(k) for k in u["changes"]}
+        resp = await client.put(f"{base}/api/products/{u['id']}", json=body, headers=headers)
+        if resp.status_code >= 400:
+            errors.append(f"update {p['name']}: {resp.status_code} {resp.text[:160]}")
+            continue
+        if "is_featured" in body:
+            await _set_featured(client, base, headers, u["id"], p.get("is_featured"))
+
+
 async def plan(source: list[dict], apply: bool = False) -> dict:
     base = target_base()
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
         token = await _login(client, base)
         target = await _target_products(client, base, token)
-        by_name = {p["name"]: p for p in target}
         headers = {"Authorization": f"Bearer {token}"}
-
-        creates, updates = [], []
-        for p in source:
-            dst = by_name.get(p["name"])
-            if not dst:
-                creates.append({"name": p["name"], "category": p.get("category"), "price": p.get("price")})
-                continue
-            diff = _differences(p, dst)
-            if diff:
-                updates.append({"name": p["name"], "id": dst["id"], "changes": diff})
+        creates, updates = _diff_plan(source, target)
 
         result = {
             "target": base,
@@ -93,26 +125,8 @@ async def plan(source: list[dict], apply: bool = False) -> dict:
             return result
 
         src_by_name = {p["name"]: p for p in source}
-        for c in creates:
-            p = src_by_name[c["name"]]
-            resp = await client.post(f"{base}/api/products", json=_payload(p), headers=headers)
-            if resp.status_code >= 400:
-                result["errors"].append(f"create {p['name']}: {resp.status_code} {resp.text[:160]}")
-                continue
-            new_id = resp.json()["id"]
-            if p.get("is_featured"):
-                await client.patch(f"{base}/api/products/{new_id}/featured",
-                                   json={"is_featured": True}, headers=headers)
-        for u in updates:
-            p = src_by_name[u["name"]]
-            body = {k: p.get(k) for k in u["changes"]}
-            resp = await client.put(f"{base}/api/products/{u['id']}", json=body, headers=headers)
-            if resp.status_code >= 400:
-                result["errors"].append(f"update {p['name']}: {resp.status_code} {resp.text[:160]}")
-                continue
-            if "is_featured" in body:
-                await client.patch(f"{base}/api/products/{u['id']}/featured",
-                                   json={"is_featured": bool(p.get("is_featured"))}, headers=headers)
+        await _apply_creates(client, base, headers, creates, src_by_name, result["errors"])
+        await _apply_updates(client, base, headers, updates, src_by_name, result["errors"])
 
         result["applied"] = True
         result["target_count"] = len(await _target_products(client, base, token))

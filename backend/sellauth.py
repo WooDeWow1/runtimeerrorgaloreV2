@@ -66,56 +66,65 @@ async def fetch_product(product_id: int) -> dict:
     }
 
 
+def _cart_line(item: dict) -> dict:
+    """Catalog line when SellAuth owns the price; custom line when we discounted it."""
+    custom_price = item.get("custom_price")
+    if custom_price is None and item.get("sellauth_product_id") and item.get("sellauth_variant_id"):
+        return {
+            "productId": int(item["sellauth_product_id"]),
+            "variantId": int(item["sellauth_variant_id"]),
+            "quantity": item["quantity"],
+        }
+    price = float(custom_price if custom_price is not None else item["price"])
+    return {"name": item["name"], "price": f"{price:.2f}", "quantity": item["quantity"]}
+
+
+async def _post_checkout(client: httpx.AsyncClient, payload: dict) -> httpx.Response:
+    """Post the checkout, retrying with older metadata shapes some shops still validate."""
+    url = f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout"
+    session_id = payload["metadata"]["checkout_session_id"]
+    resp = await client.post(url, headers=_headers(), json=payload)
+    for fallback in ([session_id], None):
+        if not (resp.status_code in (400, 422) and "metadata" in resp.text):
+            return resp
+        if fallback is None:
+            payload.pop("metadata", None)
+        else:
+            payload["metadata"] = fallback
+        resp = await client.post(url, headers=_headers(), json=payload)
+    return resp
+
+
+def _checkout_error(resp: httpx.Response) -> SellAuthError:
+    logger.error("SellAuth checkout failed: %s %s", resp.status_code, resp.text[:400])
+    message = ""
+    try:
+        body = resp.json()
+        message = body.get("message") or body.get("error") or ""
+    except ValueError:
+        pass
+    if "subscription plan" in message.lower() or "unlock checkout api" in message.lower():
+        return SellAuthPlanError(
+            "SellAuth's Checkout API is not enabled on this store's subscription plan. "
+            "Enable the Checkout API feature in SellAuth to accept payments."
+        )
+    return SellAuthError(message or f"SellAuth rejected the checkout ({resp.status_code})")
+
+
 async def create_checkout(*, items: list[dict], email: str, session_id: str) -> dict:
     """Create a SellAuth hosted checkout. Catalog items use the shop's product/variant ids so
     SellAuth owns pricing and stock. Discounted lines carry a `custom_price` and are sent as
     custom items instead, because a catalog price cannot be overridden."""
-    cart = []
-    for i in items:
-        custom_price = i.get("custom_price")
-        if custom_price is None and i.get("sellauth_product_id") and i.get("sellauth_variant_id"):
-            cart.append({
-                "productId": int(i["sellauth_product_id"]),
-                "variantId": int(i["sellauth_variant_id"]),
-                "quantity": i["quantity"],
-            })
-        else:
-            price = float(custom_price if custom_price is not None else i["price"])
-            cart.append({"name": i["name"], "price": f"{price:.2f}", "quantity": i["quantity"]})
     payload: dict[str, Any] = {
-        "cart": cart,
+        "cart": [_cart_line(i) for i in items],
         "email": email,
         "currency": "USD",
         "metadata": {"checkout_session_id": session_id},
     }
     async with httpx.AsyncClient(timeout=25) as client:
-        resp = await client.post(
-            f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
-        )
-        # Older shops validate metadata as a plain list of strings.
-        if resp.status_code in (400, 422) and "metadata" in resp.text:
-            payload["metadata"] = [session_id]
-            resp = await client.post(
-                f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
-            )
-        if resp.status_code in (400, 422) and "metadata" in resp.text:
-            payload.pop("metadata", None)
-            resp = await client.post(
-                f"{SELLAUTH_BASE}/shops/{_shop_id()}/checkout", headers=_headers(), json=payload
-            )
+        resp = await _post_checkout(client, payload)
     if resp.is_error:
-        logger.error("SellAuth checkout failed: %s %s", resp.status_code, resp.text[:400])
-        message = ""
-        try:
-            message = resp.json().get("message") or resp.json().get("error") or ""
-        except ValueError:
-            pass
-        if "subscription plan" in message.lower() or "unlock checkout api" in message.lower():
-            raise SellAuthPlanError(
-                "SellAuth's Checkout API is not enabled on this store's subscription plan. "
-                "Enable the Checkout API feature in SellAuth to accept payments."
-            )
-        raise SellAuthError(message or f"SellAuth rejected the checkout ({resp.status_code})")
+        raise _checkout_error(resp)
     data = resp.json()
     invoice = data.get("invoice") or {}
     url = data.get("url") or data.get("checkout_url") or data.get("invoice_url") or invoice.get("url")

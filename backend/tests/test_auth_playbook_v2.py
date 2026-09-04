@@ -16,8 +16,7 @@ with open("/app/frontend/.env") as f:
         if line.startswith("REACT_APP_BACKEND_URL="):
             BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN_EMAIL = os.environ["ADMIN_EMAIL"].lower()
-ADMIN_PASSWORD = "admin"
+from admin_creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 mongo = MongoClient(os.environ["MONGO_URL"])
 db = mongo[os.environ["DB_NAME"]]
