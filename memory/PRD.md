@@ -43,6 +43,13 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   Public /api/reviews never exposes email, real name or order id. Verified: iteration_19.json
   (10/10 new + 9/9 regression backend, all frontend flows green).
 
+- **Jun 2026 — review dialog mobile fix**: Turnstile switches to the `compact` widget below 480px
+  and is clipped inside the dialog; Submit/Cancel stack full width with clear spacing below the
+  widget; Submit is no longer silently disabled — a yellow reason line states exactly what is
+  missing ("N more characters needed…", "Add a title…", "Complete the verification above…").
+  The original report ("Turnstile blocks Submit") was actually the 150-character minimum leaving
+  the button disabled with no explanation.
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

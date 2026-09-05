@@ -23,6 +23,19 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
   const [captchaBroken, setCaptchaBroken] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // { coupon }
+  // Turnstile's flexible widget can overflow a phone-width dialog: go compact on small screens.
+  const compact = typeof window !== "undefined" && window.innerWidth < 480;
+
+  const short = MIN - body.trim().length;
+  const blockedReason = busy
+    ? ""
+    : short > 0
+      ? `${short} more character${short === 1 ? "" : "s"} needed before you can submit`
+      : !title.trim()
+        ? "Add a title to submit"
+        : !token && !captchaBroken
+          ? "Complete the verification above to submit"
+          : "";
 
   const submit = async (e) => {
     e.preventDefault();
@@ -175,7 +188,7 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
               {body.trim().length} / {MIN} minimum · {MAX} max
             </p>
 
-            <div className="mt-5" data-testid="review-turnstile">
+            <div className="mt-5 overflow-hidden" data-testid="review-turnstile">
               {SITE_KEY ? (
                 <Turnstile
                   siteKey={SITE_KEY}
@@ -189,7 +202,7 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
                     setCaptchaBroken(true);
                   }}
                   onExpire={() => setToken(null)}
-                  options={{ theme: "dark", size: "flexible", action: "review" }}
+                  options={{ theme: "dark", size: compact ? "compact" : "flexible", action: "review" }}
                 />
               ) : (
                 <p className="text-[10px] text-[#ff3b30]">CAPTCHA is not configured.</p>
@@ -201,18 +214,27 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
               )}
             </div>
 
-            <div className="mt-6 flex gap-3">
+            {blockedReason && (
+              <p
+                data-testid="review-blocked-reason"
+                className="mt-5 text-[10px] uppercase tracking-[0.2em] text-[#f4d03f]"
+              >
+                {blockedReason}
+              </p>
+            )}
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 data-testid="submit-review-btn"
-                disabled={busy || body.trim().length < MIN}
-                className="border border-[#00ffcc] px-6 py-2.5 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
+                disabled={busy}
+                className="w-full border border-[#00ffcc] px-6 py-3 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent sm:w-auto"
               >
                 {busy ? "Sending…" : "Submit review"}
               </button>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                className="border border-zinc-800 px-6 py-2.5 text-[10px] uppercase tracking-[0.25em] text-zinc-400 hover:text-white"
+                className="w-full border border-zinc-800 px-6 py-3 text-[10px] uppercase tracking-[0.25em] text-zinc-400 hover:text-white sm:w-auto"
               >
                 Cancel
               </button>
