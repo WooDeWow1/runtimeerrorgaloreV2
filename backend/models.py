@@ -151,6 +151,8 @@ class ReviewIn(BaseModel):
     rating: int = Field(ge=1, le=5)
     title: str = Field(min_length=2, max_length=80)
     body: str = Field(min_length=150, max_length=650)
+    display_name: str = Field(default="", max_length=40)
+    anonymous: bool = False
     turnstile_token: str = Field(min_length=1, max_length=4096)
 
 
@@ -159,6 +161,9 @@ class Review(BaseDocument):
     user_id: str = ""
     user_email: str
     first_name: str
+    display_name: str = ""
+    anonymous: bool = False
+    pinned: bool = False
     rating: int
     title: str
     body: str

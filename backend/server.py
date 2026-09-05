@@ -1310,8 +1310,11 @@ async def create_review(payload: ReviewIn, request: Request,
             raise HTTPException(status_code=400, detail=f"CAPTCHA check failed ({reason}) — please retry")
 
     user_id, email, first_name = await review_author(order, user)
+    chosen = payload.display_name.strip()
     review = Review(order_id=payload.order_id, user_id=user_id, user_email=email,
-                    first_name=first_name, rating=payload.rating,
+                    first_name=first_name, display_name=chosen,
+                    anonymous=payload.anonymous or not chosen,
+                    rating=payload.rating,
                     title=payload.title.strip(), body=payload.body.strip())
     result = await db.reviews.insert_one(review.to_mongo())
     # The reward coupon is only created once an admin approves the review.
@@ -1364,13 +1367,27 @@ async def review_status(order_ids: str = ""):
     return out
 
 
+ANONYMOUS_LABEL = "Valued Customer"
+
+
+def public_name(review: dict) -> str:
+    """Anonymous reviewers, and anyone who left the name blank, are shown as a valued customer."""
+    if review.get("anonymous") or not (review.get("display_name") or "").strip():
+        return ANONYMOUS_LABEL
+    return review["display_name"].strip()
+
+
 @api.get("/reviews")
 async def public_reviews(limit: int = 100):
-    """Approved reviews only. Never leaks the email, order or full name."""
-    docs = await db.reviews.find({"status": "approved"}).sort("created_at", -1).to_list(limit)
+    """Approved reviews only, pinned first. Never leaks the email, order or real name."""
+    docs = (
+        await db.reviews.find({"status": "approved"})
+        .sort([("pinned", -1), ("created_at", -1)])
+        .to_list(limit)
+    )
     reviews = [
         {"id": str(d["_id"]), "rating": d["rating"], "title": d.get("title", ""),
-         "body": d["body"], "first_name": d["first_name"],
+         "body": d["body"], "first_name": public_name(d), "pinned": bool(d.get("pinned")),
          "created_at": d["created_at"]}
         for d in docs
     ]
@@ -1381,8 +1398,19 @@ async def public_reviews(limit: int = 100):
 @api.get("/admin/reviews")
 async def list_reviews(status: Optional[str] = None, admin: dict = Depends(get_admin_user)):
     query = {"status": status} if status else {}
-    docs = await db.reviews.find(query).sort("created_at", -1).to_list(500)
+    docs = (
+        await db.reviews.find(query).sort([("pinned", -1), ("created_at", -1)]).to_list(500)
+    )
     return [Review.from_mongo(d).model_dump(by_alias=False) for d in docs]
+
+
+@api.post("/admin/reviews/{review_id}/pin")
+async def pin_review(review_id: str, pinned: bool = True, admin: dict = Depends(get_admin_user)):
+    """Pinned reviews lead the homepage carousel and the reviews page."""
+    result = await db.reviews.update_one({"_id": oid(review_id)}, {"$set": {"pinned": pinned}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"ok": True, "pinned": pinned}
 
 
 @api.post("/admin/reviews/{review_id}/approve")
@@ -1423,14 +1451,16 @@ async def notify_review_approved(email: str, coupon: dict) -> None:
 
 
 @api.delete("/admin/reviews/{review_id}")
-async def delete_review(review_id: str, admin: dict = Depends(get_admin_user)):
-    """Declining is a hard delete, no coupon is issued, and the order cannot be reviewed again."""
+async def delete_review(review_id: str, lock: bool = True, admin: dict = Depends(get_admin_user)):
+    """Declining (lock=true) blocks that order from ever being reviewed again. A plain delete
+    (lock=false) just clears the row — used for wiping test data."""
     review = await db.reviews.find_one({"_id": oid(review_id)})
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     await db.reviews.delete_one({"_id": oid(review_id)})
-    await db.orders.update_one({"_id": oid(review["order_id"])},
-                               {"$set": {"review_declined": True}})
+    if lock:
+        await db.orders.update_one({"_id": oid(review["order_id"])},
+                                   {"$set": {"review_declined": True}})
     return {"ok": True}
 
 

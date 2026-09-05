@@ -35,6 +35,14 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
 - **Jun 2026** — Admin can delete an order (trash icon + confirm); cascades to that order's chat
   messages, notifications and review. Verified via API (200 then 404 on repeat) + admin UI.
 
+- **Jun 2026 — review upgrade**: admin "Pin to Top" per review (pinned lead the homepage carousel,
+  the new /products carousel and /reviews with a "Featured" marker); Display Name field on the
+  review form pre-filled from the account first name; Anonymous checkbox → shown publicly as
+  "Valued Customer" (also the fallback for a blank name); admin has both Decline (deletes + locks
+  the order via `?lock=true` default) and Delete (deletes, order stays eligible, `?lock=false`).
+  Public /api/reviews never exposes email, real name or order id. Verified: iteration_19.json
+  (10/10 new + 9/9 regression backend, all frontend flows green).
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

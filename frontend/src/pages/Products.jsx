@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/useCategories";
 import { ProductCard } from "@/components/ProductCard";
+import { ReviewCarousel } from "@/components/ReviewCarousel";
 
 export default function Products() {
   const [products, setProducts] = useState([]);
@@ -67,6 +68,8 @@ export default function Products() {
           Nothing listed in {tab === "all" ? "this category" : labelOf(tab)} right now — check back this week.
         </p>
       )}
+
+      <ReviewCarousel />
     </div>
   );
 }

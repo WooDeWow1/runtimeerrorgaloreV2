@@ -3,6 +3,7 @@ import { Star } from "lucide-react";
 import { Turnstile } from "@marsidev/react-turnstile";
 import { toast } from "sonner";
 import { api, apiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
@@ -10,9 +11,14 @@ const MIN = 150;
 const MAX = 650;
 
 export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
+  const { user } = useAuth();
   const [rating, setRating] = useState(5);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [displayName, setDisplayName] = useState(
+    (user?.name || "").trim().split(" ")[0] || ""
+  );
+  const [anonymous, setAnonymous] = useState(false);
   const [token, setToken] = useState(null);
   const [captchaBroken, setCaptchaBroken] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -29,6 +35,8 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
         rating,
         title: title.trim(),
         body: body.trim(),
+        display_name: anonymous ? "" : displayName.trim(),
+        anonymous,
         turnstile_token: token || "captcha-unavailable",
       });
       setDone(data);
@@ -112,6 +120,40 @@ export const ReviewDialog = ({ orderId, open, onOpenChange, onSubmitted }) => {
               required
               className="w-full bg-[#050505] px-3 py-2.5 text-xs text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
             />
+
+            <div className="mt-5 flex flex-wrap items-end gap-5">
+              <div className="min-w-[200px] flex-1">
+                <label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                  Display name
+                </label>
+                {anonymous ? (
+                  <p
+                    data-testid="review-anonymous-note"
+                    className="py-2.5 text-xs text-zinc-500"
+                  >
+                    Shown publicly as “Valued Customer”
+                  </p>
+                ) : (
+                  <input
+                    data-testid="review-name-input"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    maxLength={40}
+                    placeholder="Valued Customer"
+                    className="w-full bg-[#050505] px-3 py-2.5 text-xs text-white outline-none ring-1 ring-zinc-800 focus:ring-[#00ffcc]"
+                  />
+                )}
+              </div>
+              <label className="flex items-center gap-2 py-2.5 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+                <input
+                  data-testid="review-anonymous-toggle"
+                  type="checkbox"
+                  checked={anonymous}
+                  onChange={(e) => setAnonymous(e.target.checked)}
+                />
+                Anonymous
+              </label>
+            </div>
 
             <label className="mt-5 mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-zinc-500">
               Your review

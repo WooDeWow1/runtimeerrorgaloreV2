@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Trash2 } from "lucide-react";
+import { Check, Pin, PinOff, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError } from "@/lib/api";
 import { Stars } from "@/components/ReviewCard";
@@ -32,10 +32,31 @@ export const ReviewsTab = () => {
   };
 
   const decline = async (r) => {
-    if (!window.confirm("Decline and permanently delete this review?")) return;
+    if (!window.confirm("Decline this review? It is deleted and the order is locked from reviewing again.")) return;
     try {
       await api.delete(`/admin/reviews/${r.id}`);
+      toast.success("Review declined");
+      load();
+    } catch (e) {
+      toast.error(apiError(e));
+    }
+  };
+
+  const remove = async (r) => {
+    if (!window.confirm("Delete this review? The order stays eligible for a new review.")) return;
+    try {
+      await api.delete(`/admin/reviews/${r.id}`, { params: { lock: false } });
       toast.success("Review deleted");
+      load();
+    } catch (e) {
+      toast.error(apiError(e));
+    }
+  };
+
+  const togglePin = async (r) => {
+    try {
+      await api.post(`/admin/reviews/${r.id}/pin`, null, { params: { pinned: !r.pinned } });
+      toast.success(r.pinned ? "Unpinned" : "Pinned to top");
       load();
     } catch (e) {
       toast.error(apiError(e));
@@ -47,8 +68,8 @@ export const ReviewsTab = () => {
       <h2 className="font-display text-sm uppercase tracking-[0.2em]">Customer reviews</h2>
       <p className="mt-2 max-w-2xl text-[10px] leading-relaxed text-zinc-600">
         Approving publishes the review and generates the customer's single-use reward coupon (any
-        star rating). Declining deletes the review for good, issues no coupon, and the order cannot
-        be reviewed again.
+        star rating). Pinned reviews always lead the homepage and reviews page. Decline deletes the
+        review and locks that order; Delete just clears the row and leaves the order eligible.
       </p>
 
       <div className="mt-6 flex flex-wrap gap-3">
@@ -91,15 +112,24 @@ export const ReviewsTab = () => {
                   >
                     {r.status}
                   </span>
+                  {r.pinned && (
+                    <span
+                      data-testid={`review-pinned-badge-${r.id}`}
+                      className="flex items-center gap-1.5 border border-[#9966cc]/60 px-2 py-1 text-[9px] uppercase tracking-[0.2em] text-[#9966cc]"
+                    >
+                      <Pin className="h-3 w-3" /> pinned
+                    </span>
+                  )}
                 </div>
                 <p className="mt-3 text-xs font-bold">{r.title}</p>
                 <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-zinc-400">{r.body}</p>
                 <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-                  {r.first_name} · {r.user_email} · order #{r.order_id.slice(-8)}
+                  shown as {r.anonymous || !r.display_name ? "Valued Customer" : r.display_name} ·{" "}
+                  {r.user_email} · order #{r.order_id.slice(-8)}
                   {r.coupon_code ? ` · coupon ${r.coupon_code}` : ""}
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {r.status !== "approved" && (
                   <button
                     data-testid={`approve-review-${r.id}`}
@@ -110,11 +140,30 @@ export const ReviewsTab = () => {
                   </button>
                 )}
                 <button
+                  data-testid={`pin-review-${r.id}`}
+                  onClick={() => togglePin(r)}
+                  className={`flex items-center gap-2 border px-4 py-2 text-[10px] uppercase tracking-[0.2em] transition-colors ${
+                    r.pinned
+                      ? "border-[#9966cc] text-[#9966cc] hover:bg-[#9966cc] hover:text-black"
+                      : "border-zinc-800 text-zinc-400 hover:border-[#9966cc] hover:text-[#9966cc]"
+                  }`}
+                >
+                  {r.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                  {r.pinned ? "Unpin" : "Pin to top"}
+                </button>
+                <button
                   data-testid={`decline-review-${r.id}`}
                   onClick={() => decline(r)}
+                  className="flex items-center gap-2 border border-zinc-800 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400 transition-colors hover:border-[#ff9500] hover:text-[#ff9500]"
+                >
+                  <X className="h-3 w-3" /> Decline
+                </button>
+                <button
+                  data-testid={`delete-review-${r.id}`}
+                  onClick={() => remove(r)}
                   className="flex items-center gap-2 border border-zinc-800 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400 transition-colors hover:border-[#ff3b30] hover:text-[#ff3b30]"
                 >
-                  <Trash2 className="h-3 w-3" /> Decline
+                  <Trash2 className="h-3 w-3" /> Delete
                 </button>
               </div>
             </div>
