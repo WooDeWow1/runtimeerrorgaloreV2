@@ -38,16 +38,55 @@ const toForm = (c) =>
         note: c.note || "",
       };
 
+// Support lookup: an auto code is either still live, spent, or timed out.
+const autoStatus = (c) => {
+  if (c.used_count > 0) {
+    return {
+      label: `redeemed${c.redeemed_at ? ` ${c.redeemed_at.slice(0, 10)}` : ""}`,
+      tone: "text-[#00ffcc]",
+    };
+  }
+  const expired = c.expires_at && new Date(c.expires_at) < new Date();
+  if (expired || c.active === false) return { label: "expired", tone: "text-[#ff3b30]" };
+  return { label: "unredeemed", tone: "text-[#f4d03f]" };
+};
+
 export const CouponsTab = ({ categories }) => {
   const [coupons, setCoupons] = useState([]);
+  const [source, setSource] = useState("manual");
+  const [reviewCfg, setReviewCfg] = useState(null);
   const [editing, setEditing] = useState(null); // null | "new" | coupon
   const [form, setForm] = useState(blank);
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.get("/admin/coupons").then(({ data }) => setCoupons(data)).catch(() => {});
+  const load = () =>
+    api
+      .get("/admin/coupons", { params: { source } })
+      .then(({ data }) => setCoupons(data))
+      .catch(() => {});
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
+
+  useEffect(() => {
+    api.get("/admin/settings/reviews").then(({ data }) => setReviewCfg(data)).catch(() => {});
   }, []);
+
+  const saveReviewCfg = async (next) => {
+    setReviewCfg(next);
+    try {
+      const { data } = await api.put("/admin/settings/reviews", {
+        enabled: next.enabled,
+        percent_off: Number(next.percent_off),
+        expiry_days: Number(next.expiry_days),
+      });
+      setReviewCfg(data);
+      toast.success("Review coupon settings saved");
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
   const set = (k) => (e) =>
     setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
@@ -124,6 +163,70 @@ export const CouponsTab = ({ categories }) => {
           <Plus className="h-3 w-3" /> New code
         </button>
       </div>
+
+      <div className="mt-6 flex flex-wrap gap-3">
+        {[
+          { key: "manual", label: "manual" },
+          { key: "auto", label: "auto-generated" },
+        ].map((t) => (
+          <button
+            key={t.key}
+            data-testid={`coupon-source-${t.key}`}
+            onClick={() => setSource(t.key)}
+            className={`border px-4 py-2 text-[10px] uppercase tracking-[0.25em] transition-colors ${
+              source === t.key ? "border-[#00ffcc] text-[#00ffcc]" : "border-zinc-800 text-zinc-500 hover:text-white"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {source === "auto" && reviewCfg && (
+        <div data-testid="review-coupon-settings" className="mt-6 border border-[#1f1f1f] bg-[#0a0a0a] p-5">
+          <h3 className="font-display text-xs uppercase tracking-[0.2em]">Review reward settings</h3>
+          <p className="mt-2 max-w-2xl text-[10px] leading-relaxed text-zinc-600">
+            Applies to every code generated from here on. A code is created when you approve a
+            review. Codes are single use, expire on their own, and stay listed here for 30 days
+            after being redeemed or expiring so you can look them up. Event Passes are excluded
+            automatically.
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-5">
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+              <input
+                data-testid="review-coupon-enabled"
+                type="checkbox"
+                checked={reviewCfg.enabled}
+                onChange={(e) => saveReviewCfg({ ...reviewCfg, enabled: e.target.checked })}
+              />
+              Feature on
+            </label>
+            <div>
+              <label className={label}>Discount %</label>
+              <input
+                data-testid="review-coupon-percent"
+                className={`${input} w-28`}
+                type="number"
+                step="0.5"
+                value={reviewCfg.percent_off}
+                onChange={(e) => setReviewCfg({ ...reviewCfg, percent_off: e.target.value })}
+                onBlur={() => saveReviewCfg(reviewCfg)}
+              />
+            </div>
+            <div>
+              <label className={label}>Expires in (days)</label>
+              <input
+                data-testid="review-coupon-days"
+                className={`${input} w-28`}
+                type="number"
+                value={reviewCfg.expiry_days}
+                onChange={(e) => setReviewCfg({ ...reviewCfg, expiry_days: e.target.value })}
+                onBlur={() => saveReviewCfg(reviewCfg)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <form onSubmit={submit} data-testid="coupon-form" className="mt-8 border border-[#00ffcc]/30 bg-[#0a0a0a] p-5">
@@ -272,6 +375,15 @@ export const CouponsTab = ({ categories }) => {
                 {c.expires_at ? ` · expires ${c.expires_at.slice(0, 10)}` : ""}
                 {c.active ? "" : " · disabled"}
               </p>
+              {c.source === "auto" && (
+                <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+                  issued to {c.issued_to || "—"} · review {c.review_id ? c.review_id.slice(-8) : "—"} ·
+                  issued {c.created_at ? c.created_at.slice(0, 10) : "—"} ·{" "}
+                  <span data-testid={`coupon-status-${c.code}`} className={autoStatus(c).tone}>
+                    {autoStatus(c).label}
+                  </span>
+                </p>
+              )}
             </div>
             <button
               data-testid={`edit-coupon-${c.code}`}

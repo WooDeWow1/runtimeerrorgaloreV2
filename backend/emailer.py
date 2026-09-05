@@ -58,31 +58,48 @@ class _EmailScan(HTMLParser):
             self._href, self._text = None, []
 
 
-def _assert_safe_email(subject: str, html: str) -> None:
-    scan = _EmailScan()
-    scan.feed(html)
+def _assert_no_input_fields(scan: "_EmailScan") -> None:
     if scan.tags & {"form", "input", "textarea", "select"}:
         raise ValueError("No forms or input fields in email (G2)")
+
+
+def _assert_no_credential_ask(subject: str, html: str) -> None:
     body = f"{subject}\n{html}".lower()
-    for p in _CRED_ASK:
-        if p in body:
-            raise ValueError(f"Email asks the recipient for credentials: {p!r} (G2)")
-    for url in scan.urls:
+    for phrase in _CRED_ASK:
+        if phrase in body:
+            raise ValueError(f"Email asks the recipient for credentials: {phrase!r} (G2)")
+
+
+def _assert_urls_safe(urls: list[str]) -> None:
+    for url in urls:
         low = url.strip().lower()
         if low.startswith(("mailto:", "tel:", "cid:", "#")):
             continue
         if not low.startswith("https://"):
             raise ValueError(f"Email links/assets must be absolute https: {url!r} (G3)")
-        host = urlparse(low).hostname or ""
-        if not _host_ok(host) or urlparse(low).username is not None:
+        parsed = urlparse(low)
+        if not _host_ok(parsed.hostname or "") or parsed.username is not None:
             raise ValueError(f"Shortened, numeric-host or credential-bearing URL: {url!r} (G3)")
-    for href, text in scan.anchors:
+
+
+def _assert_anchor_text_honest(anchors: list[tuple[str, str]]) -> None:
+    """Link text must not name a different host than the href actually points at."""
+    for href, text in anchors:
         real = urlparse(href.strip().lower()).hostname or ""
         if not real:
             continue
-        for m in _HOSTISH.finditer(text):
-            if not _same_site(m.group(1).lower(), real):
-                raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
+        for match in _HOSTISH.finditer(text):
+            if not _same_site(match.group(1).lower(), real):
+                raise ValueError(f"Anchor text {match.group(1)!r} != real link host {real!r} (G3)")
+
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan()
+    scan.feed(html)
+    _assert_no_input_fields(scan)
+    _assert_no_credential_ask(subject, html)
+    _assert_urls_safe(scan.urls)
+    _assert_anchor_text_honest(scan.anchors)
 
 
 def _site_url() -> str:
@@ -112,6 +129,10 @@ def order_url(order: dict) -> str:
 def admin_order_url(order_id: str) -> str:
     """Deep link that opens this order's chat in the admin console."""
     return f"{_site_url()}/admin?order={order_id}"
+
+
+def my_orders_url() -> str:
+    return f"{_site_url()}/my-orders"
 
 
 async def send_email(*, to: str, subject: str, html: str) -> str | None:
@@ -192,6 +213,22 @@ def customer_message_html(*, order_id: str, body: str, customer_email: str, admi
         f'<blockquote style="margin:0;padding:14px 16px;border-left:3px solid #00e6b8;'
         f'background:#fafafa;font-size:14px;line-height:1.6;white-space:pre-wrap">{escape(body)}</blockquote>'
         + _button(admin_url, "Open in admin panel")
+    )
+
+
+def review_approved_html(*, code: str, percent_off: float, expires_on: str, orders_url: str) -> str:
+    return _wrap(
+        '<h2 style="margin:0 0 14px;font-size:19px">Your review is live — here is your reward</h2>'
+        '<p style="margin:0 0 16px;font-size:14px;line-height:1.6">Thanks for taking the time to '
+        'review your order. Your discount code is ready to use.</p>'
+        f'<p style="margin:0 0 6px;font-family:monospace;font-size:22px;letter-spacing:3px">'
+        f'{escape(code)}</p>'
+        f'<p style="margin:0;font-size:14px"><strong>{percent_off:g}% off</strong> your next order · '
+        f'expires {escape(expires_on)}</p>'
+        + _button(orders_url, "View my orders")
+        + '<p style="font-size:13px;line-height:1.6;color:#3f3f46;margin:20px 0 0">'
+        'Single use only and it cannot be applied to Event Passes. The code also stays on your '
+        'orders page, so you can always find it there.</p>'
     )
 
 

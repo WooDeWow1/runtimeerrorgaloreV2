@@ -164,15 +164,17 @@ export function CartProvider({ children }) {
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
   const invalid = hasPass && !hasOther;
 
-  return (
-    <CartContext.Provider
-      value={{ items, add, remove, setQty, clear, total, discount, payable, count, invalid,
-               hasCoins, hasPass, hasOther, passCount, open, setOpen,
-               coupon, couponBusy, applyCoupon, clearCoupon, cartPayload }}
-    >
-      {children}
-    </CartContext.Provider>
+  const value = useMemo(
+    () => ({ items, add, remove, setQty, clear, total, discount, payable, count, invalid,
+             hasCoins, hasPass, hasOther, passCount, open, setOpen,
+             coupon, couponBusy, applyCoupon, clearCoupon, cartPayload }),
+    // Handlers close over `items`, so the object is rebuilt whenever the cart or coupon changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, total, discount, payable, count, invalid, hasCoins, hasPass, hasOther, passCount,
+     open, coupon, couponBusy, cartPayload]
   );
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
 export const useCart = () => useContext(CartContext);

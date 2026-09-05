@@ -77,9 +77,9 @@ class TestPartialUpdate:
                          headers=auth(admin_token))
         assert r.status_code == 200, r.text
         updated = r.json()
-        assert updated["coming_soon"] is True
-        assert updated["is_featured"] is True, "partial PUT wiped is_featured"
-        assert updated["active"] is True
+        assert updated["coming_soon"]
+        assert updated["is_featured"], "partial PUT wiped is_featured"
+        assert updated["active"]
         assert updated["name"] == target["name"]
         assert updated["price"] == target["price"]
         assert updated["category"] == target["category"]
@@ -88,7 +88,7 @@ class TestPartialUpdate:
         # verify persistence via GET
         pub = requests.get(f"{API}/products").json()
         found = next(p for p in pub if p["id"] == target["id"])
-        assert found["coming_soon"] is True and found["is_featured"] is True
+        assert found["coming_soon"] and found["is_featured"]
 
     def test_full_form_save_roundtrips_star(self, all_products, admin_token, restore):
         """Mimics the admin edit form which now sends is_featured with the full body."""
@@ -98,8 +98,8 @@ class TestPartialUpdate:
         body["coming_soon"] = True
         r = requests.put(f"{API}/products/{target['id']}", json=body, headers=auth(admin_token))
         assert r.status_code == 200, r.text
-        assert r.json()["is_featured"] is True
-        assert r.json()["coming_soon"] is True
+        assert r.json()["is_featured"]
+        assert r.json()["coming_soon"]
 
     def test_empty_body_is_noop(self, all_products, admin_token):
         target = all_products[0]
@@ -164,4 +164,4 @@ class TestIncludeInactiveGating:
     def test_public_list_unaffected_without_param(self):
         r = requests.get(f"{API}/products")
         assert r.status_code == 200
-        assert all(p["active"] is True for p in r.json())
+        assert all(p["active"] for p in r.json())

@@ -145,6 +145,35 @@ class Category(BaseDocument):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+# ---------- Reviews ----------
+class ReviewIn(BaseModel):
+    order_id: str
+    rating: int = Field(ge=1, le=5)
+    title: str = Field(min_length=2, max_length=80)
+    body: str = Field(min_length=150, max_length=650)
+    turnstile_token: str = Field(min_length=1, max_length=4096)
+
+
+class Review(BaseDocument):
+    order_id: str
+    user_id: str = ""
+    user_email: str
+    first_name: str
+    rating: int
+    title: str
+    body: str
+    status: Literal["pending", "approved"] = "pending"
+    coupon_code: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ReviewSettings(BaseModel):
+    enabled: bool = True
+    percent_off: float = Field(default=5, gt=0, le=100)
+    expiry_days: int = Field(default=7, ge=1, le=365)
+
+
 class BannerSettings(BaseModel):
     enabled: bool = False
     text: str = ""
@@ -222,6 +251,10 @@ class CouponIn(BaseModel):
 
 class Coupon(BaseDocument):
     code: str
+    source: Literal["manual", "auto"] = "manual"
+    review_id: Optional[str] = None
+    order_id: Optional[str] = None
+    issued_to: Optional[str] = None
     discount_type: str = "percent"
     percent_off: Optional[float] = None
     amount_off: Optional[float] = None
@@ -233,6 +266,8 @@ class Coupon(BaseDocument):
     max_uses: Optional[int] = None
     used_count: int = 0
     expires_at: Optional[datetime] = None
+    redeemed_at: Optional[datetime] = None
+    redeemed_order_id: Optional[str] = None
     note: str = ""
     created_at: datetime = Field(default_factory=utc_now)
 

@@ -6,6 +6,7 @@ import { CategoriesTab } from "@/components/admin/CategoriesTab";
 import { CouponsTab } from "@/components/admin/CouponsTab";
 import { OrdersTab } from "@/components/admin/OrdersTab";
 import { ProductsTab } from "@/components/admin/ProductsTab";
+import { ReviewsTab } from "@/components/admin/ReviewsTab";
 import { SettingsTab } from "@/components/admin/SettingsTab";
 import { WaitlistTab } from "@/components/admin/WaitlistTab";
 
@@ -14,6 +15,7 @@ const TABS = [
   { key: "products", label: "products" },
   { key: "categories", label: "categories" },
   { key: "coupons", label: "discount codes" },
+  { key: "reviews", label: "reviews" },
   { key: "waitlist", label: "waitlist" },
   { key: "settings", label: "settings & analytics" },
 ];
@@ -74,9 +76,8 @@ export default function Admin() {
         await api.post(`/admin/orders/${orderId}/read`);
         loadOrders();
         loadUnread();
-      } catch (err) {
+      } catch {
         // Clearing the unread flag is best-effort; the chat still opens.
-        console.warn("Could not mark order read:", apiError(err));
       }
     },
     [loadOrders, loadUnread]
@@ -251,6 +252,8 @@ export default function Admin() {
       )}
 
       {tab === "categories" && <CategoriesTab categories={categories} reload={reloadCategories} />}
+
+      {tab === "reviews" && <ReviewsTab />}
 
       {tab === "coupons" && <CouponsTab categories={categories} />}
 

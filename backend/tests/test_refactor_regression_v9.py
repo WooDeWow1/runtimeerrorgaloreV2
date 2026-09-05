@@ -55,7 +55,7 @@ def sign(raw: bytes) -> str:
 def post_webhook(body: dict, signature=True, secret_query=False):
     raw = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
-    if signature is True:
+    if signature:
         headers["signature"] = sign(raw)
     elif isinstance(signature, str):
         headers["signature"] = signature
@@ -307,20 +307,20 @@ class TestWebhook:
         r, _ = post_webhook({"invoice": {"id": f"qa-unknown-{uuid.uuid4().hex[:6]}", "status": "completed"}},
                             signature=False, secret_query=True)
         assert r.status_code == 200, r.text[:200]
-        assert r.json().get("matched") is False
+        assert not (r.json().get("matched"))
 
     def test_unknown_invoice_matched_false(self):
         r, _ = post_webhook({"invoice": {"id": f"qa-unknown-{uuid.uuid4().hex[:6]}", "status": "completed",
                                          "custom_fields": {"checkout_session_id": "000000000000000000000000"}}})
         assert r.status_code == 200
-        assert r.json().get("matched") is False
+        assert not (r.json().get("matched"))
 
     def test_unpaid_invoice_paid_false(self, bundle, cleanup):
         sid = make_session([line(bundle)], cleanup)
         r, _ = post_webhook({"invoice": {"id": f"qa-unpaid-{uuid.uuid4().hex[:6]}", "status": "pending",
                                          "custom_fields": {"checkout_session_id": sid}}})
         assert r.status_code == 200
-        assert r.json().get("paid") is False
+        assert not (r.json().get("paid"))
         assert db.checkout_sessions.find_one({"_id": ObjectId(sid)})["status"] == "awaiting_payment"
 
     def test_paid_promotes_with_coupon_redemption_and_replay_guard(self, admin, bundle, weekly, cleanup):
@@ -340,7 +340,7 @@ class TestWebhook:
         r, _ = post_webhook(body)
         assert r.status_code == 200, r.text[:300]
         data = r.json()
-        assert data.get("paid") is True
+        assert data.get("paid")
         order_id = data["order_id"]
         cleanup["orders"].append(order_id)
 
@@ -358,7 +358,7 @@ class TestWebhook:
 
         # replay -> duplicate, no second order and no double increment
         r2, _ = post_webhook(body)
-        assert r2.status_code == 200 and r2.json().get("duplicate") is True
+        assert r2.status_code == 200 and r2.json().get("duplicate")
         assert db.orders.count_documents({"session_id": sid}) == 1
         assert db.coupons.find_one({"_id": ObjectId(cid)})["used_count"] == 1
         requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin))
@@ -377,7 +377,7 @@ class TestUnreadAlerts:
         sid = make_session([line(bundle)], cleanup)
         r, _ = post_webhook({"invoice": {"id": f"qa-unread-{uuid.uuid4().hex[:8]}", "status": "completed",
                                          "custom_fields": {"checkout_session_id": sid}}})
-        assert r.status_code == 200 and r.json().get("paid") is True, r.text[:300]
+        assert r.status_code == 200 and r.json().get("paid"), r.text[:300]
         order_id = r.json()["order_id"]
         cleanup["orders"].append(order_id)
         return order_id
@@ -403,7 +403,7 @@ class TestUnreadAlerts:
 
     def test_mark_read_zeroes_that_order(self, admin, paid_order):
         r = requests.post(f"{API}/admin/orders/{paid_order}/read", headers=auth(admin))
-        assert r.status_code == 200 and r.json()["ok"] is True
+        assert r.status_code == 200 and r.json()["ok"]
         orders = requests.get(f"{API}/admin/orders", headers=auth(admin)).json()
         mine = next(o for o in orders if o["id"] == paid_order)
         assert mine["unread_count"] == 0

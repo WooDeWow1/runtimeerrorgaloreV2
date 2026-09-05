@@ -5,6 +5,7 @@ import { ShieldCheck, Zap, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/useCategories";
 import { ProductCard } from "@/components/ProductCard";
+import { ReviewCarousel } from "@/components/ReviewCarousel";
 import { useCart } from "@/context/CartContext";
 
 const HERO = "/images/snorlax.jpg";
@@ -167,6 +168,9 @@ export default function Home() {
           <div className="grid gap-8 sm:grid-cols-2 lg:col-span-6">
             <img src={PSYDUCK} alt="Psyduck" className="border border-[#1f1f1f] object-cover sm:col-span-2" />
           </div>
+        </div>
+        <div className="mx-auto max-w-[1400px] px-5 lg:px-10">
+          <ReviewCarousel />
         </div>
       </section>
 

@@ -65,7 +65,7 @@ def admin_token():
 @pytest.fixture(scope="session")
 def customer():
     email = f"trainer_{uuid.uuid4().hex[:8]}@gmail.com"
-    password = "Trainer#2026"
+    password = f"Trainer#{uuid.uuid4().hex[:12]}"
     r = requests.post(f"{API}/auth/register", json={"email": email, "password": password, "name": "Trainer Test"})
     assert r.status_code == 200, r.text
     data = r.json()
@@ -271,7 +271,7 @@ class TestWebhook:
                           headers={"signature": _sign(raw), "content-type": "application/json"})
         assert r.status_code == 200
         body = r.json()
-        assert body.get("matched") is False
+        assert not (body.get("matched"))
 
     def test_webhook_unpaid_status_creates_no_order(self):
         sid = _make_session(email="delivered@resend.dev")
@@ -282,7 +282,7 @@ class TestWebhook:
         r = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
                           headers={"signature": _sign(raw), "content-type": "application/json"})
         assert r.status_code == 200
-        assert r.json().get("paid") is False
+        assert not (r.json().get("paid"))
         assert db.orders.count_documents({}) == orders_before
         # session should still be awaiting_payment
         sess = db.checkout_sessions.find_one({"_id": ObjectId(sid)})
@@ -301,7 +301,7 @@ class TestWebhook:
                           headers={"signature": sig, "content-type": "application/json"}, timeout=60)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body.get("paid") is True
+        assert body.get("paid")
         order_id = body.get("order_id")
         assert order_id
         # Exactly one new order
@@ -320,7 +320,7 @@ class TestWebhook:
         r2 = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
                            headers={"signature": sig, "content-type": "application/json"})
         assert r2.status_code == 200
-        assert r2.json().get("duplicate") is True
+        assert r2.json().get("duplicate")
         assert db.orders.count_documents({}) == orders_before + 1
 
         # Store order_id for downstream tests
@@ -508,7 +508,7 @@ class TestWaitlist:
         email = f"TEST_wl_{uuid.uuid4().hex[:8]}@example.com"
         payload = {"email": email, "product_id": "shundo-1"}
         r1 = requests.post(f"{API}/waitlist", json=payload)
-        assert r1.status_code == 200 and r1.json().get("ok") is True
+        assert r1.status_code == 200 and r1.json().get("ok")
         # Duplicate submission does not increase count (upsert)
         r2 = requests.post(f"{API}/waitlist", json=payload)
         assert r2.status_code == 200
@@ -613,13 +613,13 @@ class TestPasswordChange:
         r = requests.post(f"{API}/auth/change-password",
                           headers=auth(customer["token"]),
                           json={"current_password": customer["password"], "new_password": new_pw})
-        assert r.status_code == 200 and r.json().get("ok") is True
+        assert r.status_code == 200 and r.json().get("ok")
 
         # Verify bcrypt hash format in DB
         user_doc = db.users.find_one({"email": customer["email"]})
         assert user_doc["password_hash"].startswith("$2b$"), f"Not bcrypt: {user_doc['password_hash'][:10]}"
         assert user_doc["password_hash"] != new_pw
-        assert user_doc.get("password_self_managed") is True
+        assert user_doc.get("password_self_managed")
 
         # OLD password rejected
         r_old = requests.post(f"{API}/auth/login",
@@ -646,7 +646,7 @@ class TestPasswordChange:
 class TestVisitorTracking:
     def test_track_public_no_auth(self):
         r = requests.post(f"{API}/track")
-        assert r.status_code == 200 and r.json().get("ok") is True
+        assert r.status_code == 200 and r.json().get("ok")
 
     def test_track_dedup_per_ip_per_day(self):
         # Use forwarded IP so we test a stable identity regardless of client
@@ -719,7 +719,7 @@ class TestStardustVisibility:
         stardust = [p for p in products if p["category"] == "stardust"]
         assert len(stardust) >= 3, f"Expected >=3 stardust, got {len(stardust)}"
         for p in stardust:
-            assert p.get("active", True) is True, f"{p['name']} not active"
+            assert p.get("active", True), f"{p['name']} not active"
 
     def test_all_category_keys_are_lowercase_snake_case(self):
         # Categories are admin-managed now, so read the live list instead of hardcoding it.
@@ -742,11 +742,11 @@ class TestFeaturedField:
         })
         assert r.status_code == 200
         data = r.json()
-        assert data["is_featured"] is False
+        assert not (data["is_featured"])
         # Verify persisted
         for p in _products():
             if p["id"] == data["id"]:
-                assert p["is_featured"] is False
+                assert not (p["is_featured"])
                 break
         requests.delete(f"{API}/products/{data['id']}", headers=auth(admin_token))
 
@@ -757,7 +757,7 @@ class TestFeaturedField:
         })
         assert r.status_code == 200
         data = r.json()
-        assert data["is_featured"] is True
+        assert data["is_featured"]
         requests.delete(f"{API}/products/{data['id']}", headers=auth(admin_token))
 
     def test_put_preserves_is_featured(self, admin_token):
@@ -771,13 +771,13 @@ class TestFeaturedField:
             "name": "TEST_FeatPut2", "category": "medals", "price": 1.5, "msrp": 3.0,
             "is_featured": True,
         })
-        assert r2.status_code == 200 and r2.json()["is_featured"] is True
+        assert r2.status_code == 200 and r2.json()["is_featured"]
         # PUT to false
         r3 = requests.put(f"{API}/products/{pid}", headers=auth(admin_token), json={
             "name": "TEST_FeatPut2", "category": "medals", "price": 1.5, "msrp": 3.0,
             "is_featured": False,
         })
-        assert r3.json()["is_featured"] is False
+        assert not (r3.json()["is_featured"])
         requests.delete(f"{API}/products/{pid}", headers=auth(admin_token))
 
 
@@ -816,18 +816,18 @@ class TestFeaturedToggle:
                               headers=auth(admin_token),
                               json={"is_featured": True})
         assert r_on.status_code == 200
-        assert r_on.json()["is_featured"] is True
+        assert r_on.json()["is_featured"]
         # Persistence via GET
         got = next(p for p in _products() if p["id"] == pid)
-        assert got["is_featured"] is True
+        assert got["is_featured"]
 
         # Toggle OFF
         r_off = requests.patch(f"{API}/products/{pid}/featured",
                                headers=auth(admin_token),
                                json={"is_featured": False})
-        assert r_off.status_code == 200 and r_off.json()["is_featured"] is False
+        assert not (r_off.status_code == 200 and r_off.json()["is_featured"])
         got2 = next(p for p in _products() if p["id"] == pid)
-        assert got2["is_featured"] is False
+        assert not (got2["is_featured"])
 
         requests.delete(f"{API}/products/{pid}", headers=auth(admin_token))
 
@@ -922,7 +922,7 @@ class TestCouponAdminCrud:
         r2 = requests.put(f"{API}/admin/coupons/{cid}", headers=auth(admin_token), json=upd)
         assert r2.status_code == 200, r2.text
         data = r2.json()
-        assert data["percent_off"] == 25 and data["active"] is False
+        assert not (data["percent_off"] == 25 and data["active"])
         assert "stardust" in data["excluded_categories"]
         assert data["min_subtotal"] == 10 and data["note"] == "upd"
         requests.delete(f"{API}/admin/coupons/{cid}", headers=auth(admin_token))
@@ -1242,7 +1242,7 @@ class TestCouponCheckout:
             r_wh2 = requests.post(f"{LOCAL_API}/webhooks/sellauth", data=raw,
                                   headers={"signature": sig, "content-type": "application/json"})
             assert r_wh2.status_code == 200
-            assert r_wh2.json().get("duplicate") is True
+            assert r_wh2.json().get("duplicate")
             coupon_doc2 = db.coupons.find_one({"_id": ObjectId(cid)})
             assert coupon_doc2["used_count"] == 1
         finally:

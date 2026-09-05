@@ -12,12 +12,14 @@ load_dotenv(ROOT_DIR / ".env")
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
+import secrets  # noqa: E402
 import httpx  # noqa: E402
 import jwt  # noqa: E402
 from bson import ObjectId  # noqa: E402
 from bson.errors import InvalidId  # noqa: E402
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
+from pymongo.errors import DuplicateKeyError  # noqa: E402
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
 
 from models import (  # noqa: E402
@@ -34,6 +36,9 @@ from models import (  # noqa: E402
     Coupon,
     CouponIn,
     CouponValidateRequest,
+    ReviewSettings,
+    Review,
+    ReviewIn,
     ClaimOrderRequest,
     FeaturedUpdate,
     LoginRequest,
@@ -62,11 +67,14 @@ from security import (  # noqa: E402
 )
 import catalog_sync  # noqa: E402
 import sellauth  # noqa: E402
+import turnstile  # noqa: E402
 from emailer import (  # noqa: E402
     admin_order_url,
     customer_message_html,
     order_tracking_html,
     order_url,
+    my_orders_url,
+    review_approved_html,
     send_email,
     support_email,
     support_reply_html,
@@ -557,6 +565,10 @@ async def load_coupon(code: str, email: str) -> dict:
         used = await db.coupon_redemptions.find_one({"code": coupon["code"], "email": email.lower()})
         if used:
             raise HTTPException(status_code=400, detail="You have already used this discount code")
+    # A review reward belongs to the customer who earned it and to nobody else.
+    if coupon.get("source") == "auto" and coupon.get("issued_to"):
+        if email.lower() != coupon["issued_to"].lower():
+            raise HTTPException(status_code=400, detail="That discount code is not valid")
     return coupon
 
 
@@ -649,8 +661,12 @@ async def assert_coupon_payload(payload: CouponIn) -> None:
 
 
 @api.get("/admin/coupons")
-async def list_coupons(admin: dict = Depends(get_admin_user)):
-    docs = await db.coupons.find().sort("created_at", -1).to_list(200)
+async def list_coupons(source: Optional[str] = None, admin: dict = Depends(get_admin_user)):
+    await sweep_auto_coupons()
+    query = {} if not source else (
+        {"source": "auto"} if source == "auto" else {"source": {"$ne": "auto"}}
+    )
+    docs = await db.coupons.find(query).sort("created_at", -1).to_list(200)
     return [Coupon.from_mongo(d).model_dump(by_alias=False) for d in docs]
 
 
@@ -770,11 +786,16 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
 
 
 async def record_redemption(session: dict, order_id: str) -> None:
-    """Count the coupon use only once the money actually landed."""
+    """Count the coupon use only once the money actually landed. Auto (review) coupons keep
+    their row after redemption so support can still look the code up."""
     if not session.get("coupon_code"):
         return
     try:
-        await db.coupons.update_one({"code": session["coupon_code"]}, {"$inc": {"used_count": 1}})
+        await db.coupons.update_one(
+            {"code": session["coupon_code"]},
+            {"$inc": {"used_count": 1},
+             "$set": {"redeemed_at": utc_now(), "redeemed_order_id": order_id}},
+        )
         await db.coupon_redemptions.update_one(
             {"code": session["coupon_code"], "email": session["email"].lower()},
             {"$set": {"order_id": order_id, "redeemed_at": utc_now()}},
@@ -853,21 +874,30 @@ def webhook_signature_ok(raw: bytes, request: Request) -> bool:
     return request.query_params.get("secret") == SELLAUTH_WEBHOOK_SECRET
 
 
-def read_invoice(payload: dict) -> tuple[dict, str, Optional[str]]:
-    """SellAuth nests the invoice differently per event, so normalise it here."""
+def _unwrap_invoice(payload: dict) -> dict:
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else payload
     if isinstance(payload.get("data"), dict) and not invoice.get("id"):
-        invoice = payload["data"]
-    invoice_id = str(invoice.get("id") or invoice.get("invoice_id") or "")
+        return payload["data"]
+    return invoice
 
+
+def _session_id_from(invoice: dict, payload: dict) -> Optional[str]:
     custom = invoice.get("custom_fields") or payload.get("custom_fields") or {}
-    session_id = custom.get("checkout_session_id") if isinstance(custom, dict) else None
+    if isinstance(custom, dict) and custom.get("checkout_session_id"):
+        return custom["checkout_session_id"]
     meta = invoice.get("metadata") or payload.get("metadata")
-    if not session_id and isinstance(meta, dict):
-        session_id = meta.get("checkout_session_id")
-    if not session_id and isinstance(meta, list) and meta:
-        session_id = str(meta[0])
-    return invoice, invoice_id, session_id
+    if isinstance(meta, dict):
+        return meta.get("checkout_session_id")
+    if isinstance(meta, list) and meta:
+        return str(meta[0])
+    return None
+
+
+def read_invoice(payload: dict) -> tuple[dict, str, Optional[str]]:
+    """SellAuth nests the invoice differently per event, so normalise it here."""
+    invoice = _unwrap_invoice(payload)
+    invoice_id = str(invoice.get("id") or invoice.get("invoice_id") or "")
+    return invoice, invoice_id, _session_id_from(invoice, payload)
 
 
 async def find_session(session_id: Optional[str], invoice_id: str) -> Optional[dict]:
@@ -1169,6 +1199,228 @@ async def sync_catalog_apply(admin: dict = Depends(get_admin_user)):
     return await _sync_catalog(apply=True)
 
 
+# ---------------- Review reward coupons (extends the existing coupon engine) ----------------
+REVIEW_SETTINGS_DEFAULTS = {"enabled": True, "percent_off": 5.0, "expiry_days": 7}
+
+
+async def review_settings() -> dict:
+    doc = await db.settings.find_one({"_id": "review_coupon"}) or {}
+    return {**REVIEW_SETTINGS_DEFAULTS, **{k: doc[k] for k in REVIEW_SETTINGS_DEFAULTS if k in doc}}
+
+
+@api.get("/admin/settings/reviews")
+async def get_review_settings(admin: dict = Depends(get_admin_user)):
+    return await review_settings()
+
+
+@api.put("/admin/settings/reviews")
+async def put_review_settings(payload: ReviewSettings, admin: dict = Depends(get_admin_user)):
+    await db.settings.update_one({"_id": "review_coupon"}, {"$set": payload.model_dump()}, upsert=True)
+    return await review_settings()
+
+
+AUTO_COUPON_RETENTION_DAYS = 30
+
+
+async def sweep_auto_coupons() -> int:
+    """Spent and expired auto coupons stay on file for 30 days so support can look a code up.
+    Manual coupons — banner code, affiliate codes — are never touched."""
+    cutoff = utc_now() - timedelta(days=AUTO_COUPON_RETENTION_DAYS)
+    result = await db.coupons.delete_many({
+        "source": "auto",
+        "created_at": {"$lt": cutoff},
+        "$or": [
+            {"used_count": {"$gte": 1}},
+            {"expires_at": {"$lt": utc_now()}},
+        ],
+    })
+    return result.deleted_count
+
+
+async def issue_review_coupon(review_id: str, user_id: str, email: str) -> Optional[dict]:
+    """One unique single-use code per approved review. Event Pass exclusion is inherited
+    from the shared coupon engine, so nothing extra is configured here."""
+    settings = await review_settings()
+    if not settings["enabled"]:
+        return None
+    await sweep_auto_coupons()
+    expires_at = utc_now() + timedelta(days=int(settings["expiry_days"]))
+    for _ in range(5):
+        code = f"THANKS{secrets.token_hex(3).upper()}"
+        coupon = Coupon(
+            code=code, source="auto", review_id=review_id, order_id=None, issued_to=email,
+            discount_type="percent", percent_off=float(settings["percent_off"]),
+            one_per_customer=True, max_uses=1, expires_at=expires_at,
+            note="Thanks for your review",
+        )
+        try:
+            await db.coupons.insert_one(coupon.to_mongo())
+        except DuplicateKeyError:
+            continue
+        return {"code": code, "percent_off": float(settings["percent_off"]),
+                "expires_at": expires_at.isoformat()}
+    logger.error("Could not generate a unique review coupon for %s", review_id)
+    return None
+
+
+# ---------------- Reviews ----------------
+async def review_author(order: dict, user: Optional[dict]) -> tuple[str, str, str]:
+    """Only the buyer may review an order. Guests keep access to their own order id."""
+    if user:
+        if order.get("user_id") and order["user_id"] != str(user["_id"]):
+            raise HTTPException(status_code=403, detail="That order belongs to another account")
+        name = (user.get("name") or user["email"].split("@")[0]).strip()
+        return str(user["_id"]), user["email"], name.split(" ")[0].title()
+    if order.get("user_id"):
+        raise HTTPException(status_code=401, detail="Sign in to review this order")
+    return "", order["user_email"], order["user_email"].split("@")[0].title()
+
+
+@api.post("/reviews")
+async def create_review(payload: ReviewIn, request: Request,
+                        user: Optional[dict] = Depends(get_optional_user)):
+    order = await db.orders.find_one({"_id": oid(payload.order_id)})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="You can review an order once it is completed")
+    if await db.reviews.find_one({"order_id": payload.order_id}):
+        raise HTTPException(status_code=400, detail="You have already reviewed this order")
+    if order.get("review_declined"):
+        raise HTTPException(status_code=400, detail="This order is no longer eligible for a review")
+
+    if not turnstile.bypassed_request(request):
+        ok, reason = await turnstile.verify(
+            payload.turnstile_token, request.client.host if request.client else None
+        )
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"CAPTCHA check failed ({reason}) — please retry")
+
+    user_id, email, first_name = await review_author(order, user)
+    review = Review(order_id=payload.order_id, user_id=user_id, user_email=email,
+                    first_name=first_name, rating=payload.rating,
+                    title=payload.title.strip(), body=payload.body.strip())
+    result = await db.reviews.insert_one(review.to_mongo())
+    # The reward coupon is only created once an admin approves the review.
+    return {"ok": True, "review_id": str(result.inserted_id), "coupon": None}
+
+
+def coupon_state(coupon: Optional[dict]) -> dict:
+    """What My Orders should show for an approved review's reward."""
+    if not coupon:
+        return {"state": "unavailable"}
+    expires_at = coupon.get("expires_at")
+    expired = bool(expires_at and expires_at.replace(tzinfo=timezone.utc) < utc_now())
+    if coupon.get("used_count", 0) >= 1:
+        state = "redeemed"
+    elif expired or not coupon.get("active", True):
+        state = "expired"
+    else:
+        state = "unredeemed"
+    return {
+        "state": state,
+        "code": coupon["code"],
+        "percent_off": coupon.get("percent_off"),
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "redeemed_at": coupon["redeemed_at"].isoformat() if coupon.get("redeemed_at") else None,
+    }
+
+
+@api.get("/reviews/status")
+async def review_status(order_ids: str = ""):
+    """Per order: whether a review exists, and the state of any reward coupon, so My Orders
+    can show the right button and keep the code visible permanently."""
+    ids = [i for i in order_ids.split(",") if i]
+    if not ids:
+        return {}
+    out: dict[str, dict] = {}
+    declined = await db.orders.find(
+        {"_id": {"$in": [oid(i) for i in ids]}, "review_declined": True}, {"_id": 1}
+    ).to_list(100)
+    for d in declined:
+        out[str(d["_id"])] = {"status": "declined"}
+    docs = await db.reviews.find({"order_id": {"$in": ids}}).to_list(100)
+    for d in docs:
+        entry = {"status": d["status"]}
+        if d["status"] == "approved":
+            coupon = (
+                await db.coupons.find_one({"code": d["coupon_code"]}) if d.get("coupon_code") else None
+            )
+            entry["coupon"] = coupon_state(coupon)
+        out[d["order_id"]] = entry
+    return out
+
+
+@api.get("/reviews")
+async def public_reviews(limit: int = 100):
+    """Approved reviews only. Never leaks the email, order or full name."""
+    docs = await db.reviews.find({"status": "approved"}).sort("created_at", -1).to_list(limit)
+    reviews = [
+        {"id": str(d["_id"]), "rating": d["rating"], "title": d.get("title", ""),
+         "body": d["body"], "first_name": d["first_name"],
+         "created_at": d["created_at"]}
+        for d in docs
+    ]
+    average = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else None
+    return {"reviews": reviews, "count": len(reviews), "average": average}
+
+
+@api.get("/admin/reviews")
+async def list_reviews(status: Optional[str] = None, admin: dict = Depends(get_admin_user)):
+    query = {"status": status} if status else {}
+    docs = await db.reviews.find(query).sort("created_at", -1).to_list(500)
+    return [Review.from_mongo(d).model_dump(by_alias=False) for d in docs]
+
+
+@api.post("/admin/reviews/{review_id}/approve")
+async def approve_review(review_id: str, admin: dict = Depends(get_admin_user)):
+    review = await db.reviews.find_one({"_id": oid(review_id)})
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    already_approved = review.get("status") == "approved"
+    await db.reviews.update_one(
+        {"_id": oid(review_id)}, {"$set": {"status": "approved", "approved_at": utc_now()}}
+    )
+    if already_approved and review.get("coupon_code"):
+        return {"ok": True, "coupon": None}
+
+    coupon = await issue_review_coupon(review_id, review.get("user_id", ""), review["user_email"])
+    if coupon:
+        await db.reviews.update_one({"_id": oid(review_id)},
+                                    {"$set": {"coupon_code": coupon["code"]}})
+        await notify_review_approved(review["user_email"], coupon)
+    return {"ok": True, "coupon": coupon}
+
+
+async def notify_review_approved(email: str, coupon: dict) -> None:
+    """Never let an email hiccup roll back an approval."""
+    try:
+        await send_email(
+            to=email,
+            subject=f"Your review is live — {coupon['percent_off']:g}% off your next order",
+            html=review_approved_html(
+                code=coupon["code"],
+                percent_off=float(coupon["percent_off"]),
+                expires_on=coupon["expires_at"][:10],
+                orders_url=my_orders_url(),
+            ),
+        )
+    except Exception as exc:
+        logger.error("Review approval email failed for %s: %s", email, exc)
+
+
+@api.delete("/admin/reviews/{review_id}")
+async def delete_review(review_id: str, admin: dict = Depends(get_admin_user)):
+    """Declining is a hard delete, no coupon is issued, and the order cannot be reviewed again."""
+    review = await db.reviews.find_one({"_id": oid(review_id)})
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    await db.reviews.delete_one({"_id": oid(review_id)})
+    await db.orders.update_one({"_id": oid(review["order_id"])},
+                               {"$set": {"review_declined": True}})
+    return {"ok": True}
+
+
 # ---------------- Visitor analytics (lightweight) ----------------
 def client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
@@ -1363,6 +1615,7 @@ INDEXES = [
     ("categories", "key", {"unique": True}),
     ("coupons", "code", {"unique": True}),
     ("coupon_redemptions", [("code", 1), ("email", 1)], {"unique": True}),
+    ("reviews", "order_id", {"unique": True}),
 ]
 
 

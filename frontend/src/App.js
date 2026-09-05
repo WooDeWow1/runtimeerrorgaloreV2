@@ -19,6 +19,7 @@ import PaymentCancel from "@/pages/PaymentCancel";
 import MyOrders from "@/pages/MyOrders";
 import OrderDetail from "@/pages/OrderDetail";
 import Admin from "@/pages/Admin";
+import Reviews from "@/pages/Reviews";
 
 function App() {
   useVisitTracker();
@@ -34,6 +35,7 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/products" element={<Products />} />
               <Route path="/about" element={<About />} />
+              <Route path="/reviews" element={<Reviews />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/checkout" element={<Checkout />} />

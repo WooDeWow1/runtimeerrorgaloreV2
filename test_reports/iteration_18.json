@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 18 — end-to-end verification of the reworked review-reward flow (coupon issued only on APPROVAL, not on submit; decline is hard-delete + order locked; auto coupons kept for 30d after redemption; single-use, issued_to-locked). New pytest file /app/backend/tests/test_review_rewards_v10.py covers 9 backend scenarios (submit-no-coupon, approve-issues-one-coupon, 1-star still gets coupon, re-approve is a no-op, decline path + review_declined flag, single-use validate after redemption keeps the row, wrong-email rejection, admin coupon delete -> reviews/status coupon.state='unavailable', 30-day sweep keeps recent/redeemed and long-lived unredeemed rows, only deletes 30d+ redeemed OR expired). All 9 pass. Playwright then drove the full customer→admin→customer loop against the preview URL with the seeded reviewqa_8787@gmail.com account and the officialwifi@icloud.com admin: submit a review on order A shows the review-coupon-pending panel with NO coupon code and MyOrders flips to review-submitted-<id>; approve fires POST /admin/reviews/{id}/approve returning coupon THANKSE95380, the toast surfaces the code, order B gets declined (row removed, order locked, no button rendered on MyOrders), Coupons/auto tab renders coupon-status-THANKSE95380 = 'unredeemed', MyOrders review-coupon-<order> shows 'COUPON CREDITED · THANKSE95380 · 5% OFF', and after the admin deletes the auto coupon the same slot switches to review-coupon-unavailable-<order>. Backend + frontend both green — no bugs found in the reworked feature.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_review_rewards_v10.py",
+    "/app/test_reports/pytest/review_rewards_v10.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1724 lines — well past the 700-line guideline. The review/coupon block (sweep_auto_coupons, issue_review_coupon, coupon_state, review_status, approve/delete review, notify_review_approved) is a clean, ~200-line unit and would move out to /app/backend/reviews.py or /app/backend/coupons.py without touching call sites — good candidate for the next split.",
+    "record_redemption swallows ALL exceptions with a plain logger.error — if the coupons collection is briefly unavailable during a paid webhook the customer keeps the coupon usable for a second order. Consider narrowing except Exception to pymongo errors and re-raising anything unexpected so the webhook retries.",
+    "coupon_state assumes stored expires_at is naive UTC and adds tzinfo before comparing — works today because Mongo strips tz on write, but any future writer using timezone-aware datetimes would trigger 'can't compare offset-naive and offset-aware' via replace(tzinfo=timezone.utc). load_coupon does exactly the same thing; both should switch to `expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)` for safety.",
+    "approve_review is not concurrency-safe: two admins clicking Approve at the same time can both pass the `already_approved` check and each issue a coupon (the update_one that sets status/approved_at is not conditional on the prior status). Suggest `find_one_and_update({..., 'status': 'pending'}, ...)` and only issue a coupon when the doc pre-update was pending.",
+    "issue_review_coupon relies on a DuplicateKeyError retry — the coupons collection must have a unique index on `code` for the collision guard to work. Please confirm the index exists in production (`db.coupons.getIndexes()`), otherwise a collision would silently create a duplicate row and load_coupon would resolve arbitrarily."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_review_rewards_v10.py (new, 9 cases)"
+  ],
+  "success_rate": {"backend": "100% (9/9 test_review_rewards_v10)", "frontend": "100% (all 6 review flow flows verified)"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin; Review-flow QA customer reviewqa_8787@gmail.com / ReviewQA#2026 (both from /app/memory/test_credentials.md). Turnstile preview host bypass works — any non-empty token is accepted by the review endpoint.",
+  "seed_data_creation": "Tests seed and hard-delete their own completed orders (TEST_SESSION_REVQA_*). The two persistent review-flow QA orders (6a9b5752c1032d87a97bd738 and 6a9b57e93acd4d6c08240c92) were used for the UI run and left in a clean state: reviews wiped, review_declined flag unset, no leftover THANKS* coupons, no coupon_redemptions rows. Two side effects touched only the QA customer's own data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The new backend suite is /app/backend/tests/test_review_rewards_v10.py — run with `pytest backend/tests/test_review_rewards_v10.py -n 0` (do NOT run under xdist, the sweep test manipulates coupon rows and races the /admin/coupons?source=auto sweep from other workers). It seeds/tears its own orders in Mongo so it is safe to re-run. For the UI, the review-flow QA customer /tmp/email.txt (reviewqa_8787@gmail.com / ReviewQA#2026) owns two completed orders 6a9b57e93acd4d6c08240c92 and 6a9b5752c1032d87a97bd738 — before running a UI regression, wipe any leftover reviews/coupons for that email and unset review_declined on those two orders (script snippet in this iteration's chat). The login button reads 'ENTER', not type=submit — use `page.get_by_role('button', name='ENTER')`. The pending-panel text is CSS-uppercased in the DOM, so compare with `.lower()` (or match on the data-testid instead). The admin approve toast is a Sonner li that shows up in document.body.innerText.",
+  "rca_of_the_issue": "N/A — no bugs in the feature under test. Only code-quality follow-ups (server.py size, race in approve_review, tz handling in load_coupon/coupon_state, unique index guarantee for coupon codes)."
+}

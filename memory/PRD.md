@@ -260,6 +260,30 @@ production — run it after adding products, since ids differ per database.
 - Full suite green after the refactor: backend_test 89, hybrid_coupons 28, refactor_regression 25,
   variants+coming_soon 26, claim_chat+product_update 24, coupon_db 3, sellauth_v6+auth_v2 31.
 
+## Reviews + auto reward coupons (2026-06)
+- `reviews` collection {order_id (unique), user_id, user_email, first_name, rating, title, body,
+  status pending|approved, coupon_code}. `POST /api/reviews` requires a **completed** order, the
+  buyer, 150–650 chars and a Turnstile token; `GET /api/reviews/status?order_ids=` drives the My
+  Orders button; `GET /api/reviews` returns approved reviews only (rating, title, body, first name —
+  never email/order) plus count + average; admin `GET /api/admin/reviews`,
+  `POST /admin/reviews/{id}/approve`, `DELETE /admin/reviews/{id}` (decline = hard delete).
+- Turnstile in `backend/turnstile.py`: siteverify server-side, never accepts on network error. Site
+  key in `frontend/.env`, secret in `backend/.env`. Only `pokecoins.cc` is registered in Cloudflare,
+  so `TURNSTILE_DEV_BYPASS_HOSTS` lists the preview host and the challenge is skipped there only
+  (checked against host / x-forwarded-host / origin / referer). Production always verifies.
+- Auto coupons extend the SAME engine: `coupons.source` = manual|auto (existing rows are manual and
+  are never swept). Each submission mints a unique `THANKS<hex>` code, single use, percent + expiry
+  from `settings._id="review_coupon"` (`GET/PUT /api/admin/settings/reviews`, defaults on/5%/7 days).
+  Issued at submit, kept even if the review is later declined. Event Pass exclusion is inherited —
+  verified: 5% on a $14.99 + $2.99 pass cart discounts only $14.99.
+- `sweep_auto_coupons()` runs on every admin coupon list and each issuance, deleting auto rows that
+  are redeemed or past expiry; `record_redemption` deletes an auto row the moment it is used.
+- Frontend: `ReviewDialog` (stars, title, body counter, Turnstile, thank-you + coupon), `/reviews`
+  page + nav link, `ReviewCarousel` (3 at a time, rotates every 7s, right-aligned under Phase Two),
+  admin Reviews tab, and Manual / Auto-Generated tabs inside the existing coupon section.
+- Seeded the owner's single test review (Test / "Just A Test" / 5★, approved) via
+  `scripts/seed_test_review.py`.
+
 ## Testing
 Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
 assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).

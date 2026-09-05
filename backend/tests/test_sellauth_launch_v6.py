@@ -249,12 +249,12 @@ class TestBanner:
             assert got["text"] == "QA IT14 banner"
             assert got["link_url"] == "/products"
             assert got["link_label"] == "QA link"
-            assert got["enabled"] is True
+            assert got["enabled"]
 
             off = {**new, "enabled": False}
             assert client.put(f"{BASE}/admin/settings/banner", headers=admin_headers,
                               json=off).status_code == 200
-            assert client.get(f"{BASE}/settings/banner").json()["enabled"] is False
+            assert not (client.get(f"{BASE}/settings/banner").json()["enabled"])
         finally:
             client.put(f"{BASE}/admin/settings/banner", headers=admin_headers, json=original)
             assert client.get(f"{BASE}/settings/banner").json() == original

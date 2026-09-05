@@ -84,7 +84,7 @@ class TestProductListing:
         assert r.status_code == 200
         pub = r.json()
         assert len(pub) > 0
-        assert all(p["active"] is True for p in pub), "inactive product leaked into public list"
+        assert all(p["active"] for p in pub), "inactive product leaked into public list"
         assert all("_id" not in p and "id" in p for p in pub), "_id leaked"
         assert all("coming_soon" in p for p in pub)
         # seeded shundo services are coming_soon and must still be listed publicly
@@ -108,13 +108,13 @@ class TestVisibilityToggles:
         target = next(p for p in all_products
                       if p["category"] == "stardust" and not p.get("coming_soon") and p["active"])
         updated = restorer(target, coming_soon=True)
-        assert updated["coming_soon"] is True
-        assert updated["active"] is True
+        assert updated["coming_soon"]
+        assert updated["active"]
 
         pub = requests.get(f"{API}/products").json()
         found = next((p for p in pub if p["id"] == target["id"]), None)
         assert found is not None, "coming_soon product disappeared from the storefront list"
-        assert found["coming_soon"] is True
+        assert found["coming_soon"]
 
     def test_inactive_product_hidden_publicly_but_visible_with_include_inactive(
         self, all_products, restorer, admin_token
@@ -130,15 +130,15 @@ class TestVisibilityToggles:
                                   headers=auth(admin_token)).json()
         found = next((p for p in admin_list if p["id"] == target["id"]), None)
         assert found is not None, "inactive product missing from admin list"
-        assert found["active"] is False
+        assert not (found["active"])
 
     def test_featured_coming_soon_persists(self, all_products, restorer):
         target = next(p for p in all_products if p["category"] == "shundo_service")
         updated = restorer(target, coming_soon=True, is_featured=True, active=True)
-        assert updated["coming_soon"] is True and updated["is_featured"] is True
+        assert updated["coming_soon"] and updated["is_featured"]
         pub = requests.get(f"{API}/products").json()
         found = next(p for p in pub if p["id"] == target["id"])
-        assert found["is_featured"] is True and found["coming_soon"] is True
+        assert found["is_featured"] and found["coming_soon"]
 
     def test_toggle_featured_endpoint(self, all_products, admin_token):
         target = next(p for p in all_products if p["category"] == "shundo_service")
@@ -172,7 +172,7 @@ class TestFeaturedPreservedOnUpdate:
         try:
             r = requests.put(f"{API}/products/{target['id']}", json=body, headers=auth(admin_token))
             assert r.status_code == 200, r.text
-            assert r.json()["is_featured"] is True, (
+            assert r.json()["is_featured"], (
                 "PUT /api/products/{id} without is_featured wiped the featured flag"
             )
         finally:

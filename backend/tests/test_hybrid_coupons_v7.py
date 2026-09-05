@@ -93,7 +93,7 @@ class TestCategories:
         assert [c["key"] for c in data] == self.EXPECTED
         assert all("_id" not in c and "id" in c for c in data)
         shundo = next(c for c in data if c["key"] == "shundo_service")
-        assert shundo["coming_soon"] is True
+        assert shundo["coming_soon"]
         assert shundo["label"] == "Shundo Hunting (Waitlist)"
 
     def test_admin_guard(self, anon):
