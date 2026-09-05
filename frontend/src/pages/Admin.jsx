@@ -122,6 +122,18 @@ export default function Admin() {
     }
   };
 
+  const removeOrder = async (id) => {
+    if (!window.confirm(`Permanently delete order #${id.slice(-8)} and its chat?`)) return;
+    try {
+      await api.delete(`/admin/orders/${id}`);
+      toast.success("Order deleted");
+      loadOrders();
+      loadUnread();
+    } catch (e) {
+      toast.error(apiError(e));
+    }
+  };
+
   const reveal = async (id) => {
     try {
       const { data } = await api.get(`/admin/orders/${id}/credentials`);
@@ -227,6 +239,7 @@ export default function Admin() {
           onOpenChat={openChat}
           onSetStatus={setStatus}
           onReveal={reveal}
+          onDelete={removeOrder}
         />
       )}
 

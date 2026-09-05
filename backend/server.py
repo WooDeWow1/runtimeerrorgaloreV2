@@ -1023,6 +1023,19 @@ async def mark_order_read(order_id: str, admin: dict = Depends(get_admin_user)):
     return {"ok": True}
 
 
+@api.delete("/admin/orders/{order_id}")
+async def delete_order(order_id: str, admin: dict = Depends(get_admin_user)):
+    """Hard delete, used to clear out test orders. Takes the order's chat, notifications and
+    review with it so nothing is left orphaned."""
+    result = await db.orders.delete_one({"_id": oid(order_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await db.messages.delete_many({"order_id": order_id})
+    await db.notifications.delete_many({"order_id": order_id})
+    await db.reviews.delete_many({"order_id": order_id})
+    return {"ok": True}
+
+
 @api.get("/orders/{order_id}")
 async def get_order(order_id: str, user: Optional[dict] = Depends(get_optional_user)):
     doc = await db.orders.find_one({"_id": oid(order_id)})

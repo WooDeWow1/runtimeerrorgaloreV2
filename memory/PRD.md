@@ -1,306 +1,52 @@
-# PokeCoins — Product Requirements
+# PokeCoins — PRD
 
 ## Problem statement
-Full-stack e-commerce web app for selling digital gaming services (Pokémon GO items):
-React frontend, FastAPI backend, MongoDB. Product catalog, strict cart logic (Event Passes
-require Coin Bundles), SellAuth payments (Crypto/CashApp), encrypted PTC credential capture,
-order tracking, admin dashboard, premium dark "hacker-forum" aesthetic.
+Full-stack e-commerce app for selling digital Pokémon GO services. React frontend, FastAPI
+backend, MongoDB. Product catalog, strict cart logic (Event Passes require another item, max 1),
+SellAuth checkout (Crypto/CashApp), encrypted PTC credential capture, order tracking, customer↔admin
+chat, admin dashboard, premium dark "hacker-forum" aesthetic.
+
+## Environments
+- Production: https://pokecoins.cc (user redeploys)
+- Preview (dev): REACT_APP_BACKEND_URL in /app/frontend/.env
 
 ## Architecture
-- `/app/backend`: server.py (routes), models.py, security.py (JWT + Fernet), sellauth.py, emailer.py
-- `/app/frontend`: React 19 + CRA/craco, pages/ components/ context/ lib/
-- Images localized in `/app/frontend/public/images/`
-- Orders are created ONLY by the SellAuth webhook; checkout creates a 30-min `checkout_sessions` doc
+- backend: server.py (API), models.py, security.py (Fernet + JWT), sellauth.py, emailer.py
+  (Emergent managed email), catalog_sync.py, turnstile.py, tests/
+- frontend: src/pages/*, src/components/*, src/components/admin/* (tab modules), context/, lib/api.js
+- Auth: JWT in HttpOnly cookies. Coupons/discounts computed server-side, final price sent to SellAuth.
 
-## Product visibility rules (global, no per-product exceptions)
-- `active = false` → hidden from the storefront entirely (admin-only hide switch)
-- `coming_soon = true` (with active) → renders on Products, and on Home when `is_featured`;
-  shows a Coming Soon overlay + muted price, no savings badge, Join Waitlist instead of Add to Cart
-- Backend rejects coming-soon/inactive items at checkout
+## Implemented (to June 2026)
+- Catalog, categories, variants, SellAuth catalog sync, coming-soon + waitlist
+- Cart rules, master coupon system (% / fixed, category exclusions, Event Passes always excluded)
+- Checkout sessions (30 min TTL), SellAuth webhook, order confirmation email, order chat with
+  unread badges + email alerts, admin PTC reveal, order status flow with customer notifications
+- Reviews: one per completed order, Turnstile CAPTCHA, admin approve/decline, public /reviews page
+  + homepage carousel
+- **Jun 2026 — review reward rework**: coupon issued ONLY on admin approval (any star rating),
+  decline = hard delete + order permanently ineligible (`review_declined`), auto coupons kept after
+  redemption with `redeemed_at`, swept only after 30 days, strictly single use and locked to the
+  issued_to email, approval email with code/percent/expiry, My Orders shows the code permanently
+  with Credited / Redeemed / Expired / "Coupon no longer available" states, admin auto-coupon tab
+  shows unredeemed / redeemed(date) / expired. Verified: iteration_18.json (9/9 backend + all
+  frontend flows green).
+- **Jun 2026** — /reviews explainer banner ("How our reviews work"); star summary hidden below 3
+  approved reviews.
+- **Jun 2026** — Admin can delete an order (trash icon + confirm); cascades to that order's chat
+  messages, notifications and review. Verified via API (200 then 404 on repeat) + admin UI.
 
-## Implemented
-- Catalog, cart rules, guest checkout, SellAuth checkout + webhook, encrypted PTC creds
-- Order tracking + emails (Emergent Resend), admin orders/products, featured star toggles
-- Products page, About Us, Platinum Medals & Stardust categories
-- Settings & Analytics admin tab (password change, IP geolocation analytics)
-- Coupon system with per-product/category exclusions, min spend, max uses
-- **2026-06**
-  - Fixed-amount coupons (`discount_type` percent|fixed + `amount_off`), capped so the cart keeps
-    a $0.50 minimum charge; admin type selector
-  - One-per-customer coupons (`one_per_customer` + `coupon_redemptions`), enforced on validate and
-    checkout, recorded on webhook payment; applied code clears if the guest email changes
-  - Waitlist admin tab (email, source product, date, search, CSV export)
-  - Pokeball favicon
-  - Coming Soon / Active unified: removed the hardcoded Shundo product section on Home
-    (`shundo_service` now a normal featured category), Coming Soon overlay + notice on cards
-  - **Root cause of the vanishing-product bug**: `PUT /api/products/{id}` rebuilt the document from
-    `ProductIn`, silently resetting `is_featured` to false on every admin edit. Now uses
-    `ProductUpdate` with `exclude_unset=True`; the admin form also round-trips `is_featured`
-  - `GET /api/products?include_inactive=true` now requires an admin token
+## Email
+Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
+Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a
+separately verified outbound domain (iCloud custom domains cannot do API sending).
 
 ## Backlog
-- P1: Brute-force lockout keys on the ingress pod IP (`request.client.host`) instead of
-  X-Forwarded-For, so lockout fires late and can be bypassed. Needs auth review.
-- P1: CORS uses `allow_origin_regex='.*'` with `allow_credentials=True`; wire `CORS_ORIGINS`.
-- P2: Bundle deals — automatic discount when Stardust is bought with a coin bundle
-- P2: Retry/backoff around the emailer (429s seen under load)
-- P2: Server-side product-name join on `/api/admin/waitlist`; paginate `/api/products`
-- P2: Split `Admin.jsx` (840 lines) into per-tab components
-
-## Production
-Live at https://pokecoins.cc (preview and production use separate databases).
-`/app/scripts/sync_products_to_prod.py` is a one-time/repeatable catalog sync: it reads the
-preview catalog from localhost:8001, creates any product production is missing (matched by name)
-via the live admin API, and syncs the `is_featured` star. Run with no args for a dry run,
-`--apply` to write. Reads ADMIN_EMAIL / ADMIN_PASSWORD from backend/.env.
-`/app/scripts/sync_coupons_to_prod.py` does the same for discount codes (skips codes production
-already has, remaps product exclusions from preview ids to production ids by product name).
-`/app/scripts/fix_coupon_exclusions.py` re-syncs exclusions on coupons that already exist in
-production — run it after adding products, since ids differ per database.
-- 2026-06: used it to push the 3 Stardust products (missing in production because writes were
-  blocked when the cluster was full) and to restore 3 featured stars. Production now has all 11.
-- 2026-06: synced coupons META / 1337 / FOREVERFRIENDS to production plus the Mega Raid Day
-  Ticket product, then repaired the exclusion lists. All 3 codes verified live on pokecoins.cc.
-
-## SellAuth payment flow (2026-06)
-- Webhook URL to configure in SellAuth (Notifications → webhook, invoice events):
-  `https://pokecoins.cc/api/webhooks/sellauth`. Secret lives at
-  dash.sellauth.com/shop#miscellaneous and must equal `SELLAUTH_WEBHOOK_SECRET`.
-  Signature = HMAC-SHA256 of the raw body in the `X-Signature` header (verified working).
-- SellAuth's Checkout API has NO return_url/success_url, and the per-product "Redirect URL"
-  setting does not apply to custom cart items, so SellAuth can never redirect buyers back.
-  Fix: checkout opens the SellAuth invoice in a NEW TAB and routes the original tab to
-  `/payment/success?session_id=...`, which polls `/api/checkout-sessions/{id}` until the order
-  exists. The success page offers "Reopen payment window" from `pokeforge_checkout_url`.
-- The React route is `/payment/success` (NOT `/payment-success` — that renders a blank page).
-- Session id is now sent as SellAuth `metadata` (documented field) instead of the unsupported
-  top-level `custom_fields`; the webhook reads metadata (dict or list) then falls back to invoice id.
-- SellAuth failures now return 400, not 502/503, so the real message reaches the buyer instead of
-  a Cloudflare error page.
-- The Emergent email proxy returns 422 `undeliverable_recipient` for fake test addresses
-  (use delivered@resend.dev for tests). Real addresses deliver fine; emailer now logs the body.
-
-## Customer chat, accounts & dashboard (2026-06)
-- `/payment/success` now shows the live order chat plus a "Create account to track order" card
-  (`ClaimAccountCard`) for anonymous buyers.
-- `POST /api/auth/claim-order` {order_id, password}: email is taken from the ORDER (never the
-  caller), refuses orders that already have a user_id or an email that already has an account,
-  and adopts every unclaimed order with that email (case-insensitive match).
-- `/my-orders` (`MyOrders.jsx`, also served at `/dashboard`; `Dashboard.jsx` deleted) lists orders
-  with an inline Open Chat toggle per order. Guest ids come from `pokeforge_guest_orders`
-  localStorage, capped at 20 and pruned when unreadable.
-- Polling: OrderChat 3s, NotificationBell 10s (no websockets, by user's choice).
-- Admin replies notify account holders in-app AND email the buyer (`support_reply_html`), using
-  `order.origin_url` which is now persisted on the order.
-- Login lockout is keyed on the forwarded client IP (`client_ip`) so 5 failures actually lock.
-
-## Order confirmation email (2026-06)
-- Fires from the SellAuth webhook path in `create_order_from_session`, so it only sends once
-  payment is confirmed. Idempotent: a repeated webhook returns the existing order and re-sends nothing.
-- Branded pokecoins.cc shell (`_wrap` in emailer.py): dark header POKE/COINS wordmark, neon
-  #00e6b8 CTA, footer linking pokecoins.cc. Same shell used for admin chat replies.
-- CTA "Track order & chat with us" links to `{origin_url}/order/{id}`, which falls back to
-  `PUBLIC_APP_URL` (https://pokecoins.cc) via `emailer.order_url()` when origin is missing or
-  not https — the old code silently produced a relative link and tripped the G3 link gate.
-- Both sends are wrapped in try/except: a provider outage can no longer fail a paid order.
-- `PUBLIC_APP_URL` added to backend/.env.
-
-## Commercial launch — SellAuth catalog (2026-06)
-- Checkout now sends SellAuth **catalog** items (`productId` + `variantId`) instead of custom lines,
-  so SellAuth owns pricing, stock and coupons. Ids live on each product
-  (`sellauth_product_id` / `sellauth_variant_id`), mapped by `/app/scripts/map_sellauth_ids.py`
-  (dry run by default, `--apply` to write; also syncs price from the SellAuth variant).
-  Shundo items stay unmapped (coming soon) and would fall back to custom lines.
-- Local coupon engine DELETED (`apply_coupon`, `/coupons/validate`, `/admin/coupons`, coupons +
-  coupon_redemptions indexes, admin Coupons tab). The checkout coupon field now passes the code
-  through as SellAuth's `coupon` param; the discount appears on SellAuth's payment page.
-- Admin Products tab is now display-only: Featured star + Coming Soon toggle, no create/edit/
-  delete/price. Product create/update/delete API endpoints still exist for scripts.
-- Cart rules: an Event Pass needs at least one non-pass item (any category) and is capped at 1 per
-  order — enforced client-side (`CartContext`, ProductCard lock) and server-side
-  (`assert_cart_rules`). Event pass copy/badge updated to "ADD-ON ONLY".
-- Announcement banner: `settings` collection doc `banner`; `GET /api/settings/banner` (public),
-  `PUT /api/admin/settings/banner` (admin, rejects non-https/non-path links). Rendered site-wide by
-  `AnnouncementBanner` above the Navbar, dismissible per session.
-- /products sorts PokéCoins first (CATEGORY_ORDER).
-- Checkout opens the SellAuth tab synchronously on click (popup-blocker safe) and closes it on error.
-- /payment/success polls every 2s for up to 2 min, unlocking chat + the claim-account card.
-- Email links always use PUBLIC_APP_URL (https://pokecoins.cc).
-
-## Catalog sync button (2026-06)
-- Admin → Products → "Push catalog live": `GET /api/admin/sync/catalog` (dry-run diff) and
-  `POST /api/admin/sync/catalog` (apply). Logic in `/app/backend/catalog_sync.py`: logs into
-  PUBLIC_APP_URL with ADMIN_EMAIL/ADMIN_PASSWORD, matches products by NAME, creates missing ones
-  and PUTs changed fields. Never deletes. Replaces `scripts/sync_products_to_prod.py`.
-- `sellauth_product_id` / `sellauth_variant_id` added to ProductIn + ProductUpdate so the ids
-  can be pushed over the API (previously only settable by direct DB scripts).
-- Finding 2026-06: production has all 13 products but is MISSING every SellAuth id, so live
-  checkout falls back to custom line items. One "Push to production" fixes it. Not pushed yet
-  (waiting on the user, since it writes to the production database).
-- Backlog: sync does not push banner settings or delete products removed in preview.
-
-## Hybrid launch — Emergent owns catalog + coupons, SellAuth owns checkout (2026-06)
-- **Categories are data**, not code: `categories` collection ({key, label, note, coming_soon, order}).
-  `GET /api/categories` (public); admin POST / PUT / `POST /{id}/move` {up|down} / DELETE (delete is
-  blocked while products still use the key). `key` is slugified from the label on create and is
-  NEVER re-slugified on rename, so product references stay intact. Seeded: Pokécoins, Event Passes,
-  PokéLid Stamp Rally, Platinum Medals, Stardust, Shundo Hunting (Waitlist, coming soon).
-  Frontend reads them via `lib/useCategories.js`; `CATEGORY_LABELS` deleted from api.js.
-- **Admin Products** is a full editor again (`components/admin/ProductEditor.jsx`): name, description,
-  category, price, MSRP, badge, image filename, SellAuth product id, active/coming soon/featured.
-  Image filenames resolve to `/images/<file>` with a live thumbnail. `GET /api/admin/sellauth/products/{id}`
-  + `sellauth_fields()` auto-resolve the variant id and overwrite price from the live SellAuth variant
-  on create and whenever the SellAuth id changes, so ids/prices are never typed twice.
-- **Coupon engine rebuilt on this side** (`discount_eligible` / `load_coupon` / `compute_discount`):
-  percent or fixed, expiry, min cart, max uses, one-per-customer (`coupon_redemptions`), category
-  exclusions. Event Passes can NEVER be discounted — blocked by `NO_DISCOUNT_CATEGORIES=["event_pass"]`
-  AND `NO_DISCOUNT_SELLAUTH_IDS=[851924, 851927, 851928]`. Mixed carts discount only the eligible
-  lines; the discount is spread across them so SellAuth receives the exact final total.
-  `POST /api/coupons/validate` powers the Apply button on checkout; admin CRUD at `/api/admin/coupons`.
-  Redemption is recorded on the webhook (paid) path, not at checkout.
-- **No coupon code is sent to SellAuth any more.** The user disables the coupon field in the SellAuth
-  dashboard themselves (no API for it). When a coupon applies, those lines go to SellAuth as CUSTOM
-  line items (`custom_price`) because a catalog price cannot be overridden; full-price carts still use
-  catalog productId/variantId so SellAuth keeps stock tracking.
-- New PokéLid products seeded: Japan PokéLid Stamp Rally Collection (857694) and LEGO PokéLid Stamp
-  Rally (857690), prices pulled live from SellAuth ($49.99), images `/images/japanlid.jpg` and
-  `/images/legolid.jpg`.
-- Home page is a single flat "Featured Stock" grid (1/2/3/4 cols) — no per-category sections.
-- Iteration 15 fixes after testing: PUT /admin/coupons now rejects duplicate codes (was a 500 from
-  the unique index) and enforces the same percent_off/amount_off guards as POST; category and coupon
-  deletes now confirm in the UI.
-- Still open (backlog): CORS `allow_origin_regex='.*'` with credentials, native date input for coupon
-  expiry, server.py is ~1300 lines and should be split into routers.
-
-## Email (2026-06)
-- `EMAIL_REPLY_TO` is now `support@pokecoins.cc` (was `pokecoinorders@gmail.com`). It is sent to the
-  Emergent email proxy as `contact_email`, so replies to any order/chat email land there.
-- `emailer.support_line()` also prints the address in the branded footer of every email
-  ("Questions? Reply to this email or write to support@pokecoins.cc"). Verified against the G2/G3
-  safety gate. NOTE: production has its own env — the same key must be set there before the change
-  is live on pokecoins.cc.
-
-## Product variants + description formatting (2026-06)
-- `products.variants` = `[{label, sellauth_variant_id, price}]`. Empty list = single-price product.
-  Seeded by `seed_variants()` for the two Event Passes (851924: Basic 1508676 / + 6 Ranks 1553265 /
-  Ultra Box 1553266; 851928: Basic 1508694 / +10 Ranks 1553263 / Ultra Box 1553264) with prices read
-  live from the SellAuth variants. Managed in the admin product editor (add/remove option rows, or
-  prefilled by the Fetch button — `sellauth.fetch_product()` strips the product-name prefix from
-  SellAuth's variant names so labels stay short).
-- `CartItemIn.variant_id` → `resolve_items()` picks the variant, prices the line from it and sends
-  that exact SellAuth variantId; an unknown id is a 400. `OrderItem.variant_label` is shown in the
-  cart, checkout summary, order pages, admin orders and the confirmation email.
-- A **cart line is product + variant** (`line_key()` server side, `key: productId:variantId` in
-  CartContext), so the same pass with two different options is two lines. Legacy carts in
-  localStorage are migrated on load.
-- Descriptions keep their line breaks everywhere: `whitespace-pre-line` on the card (clamped to 3
-  lines as a teaser) and in the new `ProductDetailDialog`, which opens from the card image, title or
-  "Full details" and shows the untruncated text plus the variant picker and Add to cart.
-- 2026-06: added GO Pass Deluxe: Mega Finale (864451, event_pass) with Basic 1570359 / + 10 Ranks
-  1570360 / Ultra Box 1570361; prices read live from SellAuth (10.99 / 114.99 / 18.99 — the middle
-  one looks like a dashboard typo, flagged to the user, NOT changed here).
-- Iteration 16: 45/45 backend tests and all frontend flows passed; the reported console/a11y nits
-  (`<option>` child expression, missing DialogDescription) are fixed.
-
-## Coupon field in the cart drawer (2026-06)
-- The applied coupon now lives in `CartContext` (`coupon`, `applyCoupon`, `clearCoupon`, `discount`,
-  `payable`), so the cart drawer and the checkout page share one state — a code entered in the drawer
-  is still applied on /checkout and `coupon.code` is what goes to `POST /orders/checkout`, where the
-  server re-prices the cart and hands SellAuth the discounted total.
-- The chip, the DISCOUNT row and the apply toast show the **percentage** (`percent_label` from
-  `/coupons/validate`), never a dollar amount — fixed-$ codes show their effective % of the cart.
-- `components/CouponField.jsx` is the single shared input (testPrefix `cart` / `checkout`), styled to
-  match the neon checkout button. The drawer shows Subtotal / Discount / Total live, above
-  "Proceed to checkout".
-- Changing the cart re-validates the code against `/coupons/validate` and drops it with a toast if it
-  no longer qualifies (e.g. the minimum spend is no longer met). `clear()` also clears the coupon.
-
-## Admin unread message alerts (2026-06)
-- `orders.admin_read_at` marks when an operator last opened or answered an order. `unread_for_order()`
-  counts customer messages newer than that. `GET /api/admin/orders` now returns `unread_count` per
-  order, `GET /api/admin/unread` returns `{orders, messages}` for the tab dot (polled every 15s), and
-  `POST /api/admin/orders/{id}/read` is fired when the admin opens a chat (sending a reply also marks
-  it read).
-- Admin UI: neon-green "N NEW" pill on the order row, the Open chat button turns green, and a pulsing
-  green dot sits on the Orders tab while anything is unanswered.
-- A customer message now emails `EMAIL_REPLY_TO` (support@pokecoins.cc) with subject
-  `New Customer Message - Order #<last 8>`, the message body and a deep link
-  `{PUBLIC_APP_URL}/admin?order=<id>` — the admin page reads `?order=` and opens that chat directly.
-  Send verified (202 Accepted). The send is wrapped in try/except so chat never fails on a mail error.
-
-## Code-review cleanup (2026-06)
-- Backend complexity split into named helpers, behaviour unchanged: `checkout` → `price_cart` +
-  `sellauth_cart`; `create_order_from_session` → `record_redemption` + `send_order_confirmation`;
-  `sellauth_webhook` → `webhook_signature_ok` + `read_invoice` + `find_session` + `invoice_is_paid`;
-  `compute_discount` → `assert_coupon_fits` + `discount_amount`; `sellauth.create_checkout` →
-  `_cart_line` + `_post_checkout` + `_checkout_error`; `catalog_sync.plan` → `_diff_plan` +
-  `_apply_creates` + `_apply_updates`. `POST /admin/orders/{id}/read` now 404s on an unknown id.
-- Test creds live in `tests/admin_creds.py` (reads ADMIN_EMAIL/ADMIN_PASSWORD from backend/.env);
-  no admin password literals remain in the suite. The 23 tests skipped as "coupon engine removed in
-  iteration 14" are re-enabled now the engine is back.
-- `Admin.jsx` 735 → ~265 lines: `components/admin/OrdersTab|ProductsTab|WaitlistTab|SettingsTab`.
-  Loaders are `useCallback`, effects list real deps, ProductEditor variant rows keyed by a stable
-  `uid`, PaymentSuccess holds `clear` in a ref so the poll never restarts.
-- StrictMode traps fixed after iteration 17: `openChat` does its mark-read OUTSIDE the `setOpenOrder`
-  updater (double invocation was swallowing it) and the `?order=` deep link sets rather than toggles,
-  guarded by a ref. Banner form is disabled until `GET /settings/banner` resolves so a fast save can
-  no longer wipe the live banner. Applying a coupon no longer double-posts `/coupons/validate`.
-- Deliberately NOT done (would be churn or a rewrite, flagged to the user): moving the JWT out of
-  localStorage into httpOnly cookies, the 32%→70% type-hint push, de-inlining framer-motion prop
-  objects, and the craco dev `console.warn`. Ruff reports zero F821/F632, so the review's "undefined
-  variables" and "`is` vs `==`" findings were false positives.
-
-- Iteration 17 follow-ups: re-enabling the 23 dormant coupon tests exposed stale expectations
-  (`coupon_code`→`code`, `excluded_items`→`excluded_names`, wording) — tests aligned to the current
-  contract, and `/coupons/validate` now also returns `percent_off`/`amount_off`. Coupon create/update
-  reject an unknown `excluded_categories` key. The all-excluded message now reads "does not apply to
-  any item in your cart — it cannot be used on Event Passes". Real bug found and fixed on the way:
-  `GET /admin/orders/{id}/credentials` 500'd on legacy rows whose ciphertext no longer decrypts; it
-  now returns "(unreadable — ask the customer in chat)" instead of crashing the admin panel.
-- Full suite green after the refactor: backend_test 89, hybrid_coupons 28, refactor_regression 25,
-  variants+coming_soon 26, claim_chat+product_update 24, coupon_db 3, sellauth_v6+auth_v2 31.
-
-## Reviews + auto reward coupons (2026-06)
-- `reviews` collection {order_id (unique), user_id, user_email, first_name, rating, title, body,
-  status pending|approved, coupon_code}. `POST /api/reviews` requires a **completed** order, the
-  buyer, 150–650 chars and a Turnstile token; `GET /api/reviews/status?order_ids=` drives the My
-  Orders button; `GET /api/reviews` returns approved reviews only (rating, title, body, first name —
-  never email/order) plus count + average; admin `GET /api/admin/reviews`,
-  `POST /admin/reviews/{id}/approve`, `DELETE /admin/reviews/{id}` (decline = hard delete).
-- Turnstile in `backend/turnstile.py`: siteverify server-side, never accepts on network error. Site
-  key in `frontend/.env`, secret in `backend/.env`. Only `pokecoins.cc` is registered in Cloudflare,
-  so `TURNSTILE_DEV_BYPASS_HOSTS` lists the preview host and the challenge is skipped there only
-  (checked against host / x-forwarded-host / origin / referer). Production always verifies.
-- Auto coupons extend the SAME engine: `coupons.source` = manual|auto (existing rows are manual and
-  are never swept). Each submission mints a unique `THANKS<hex>` code, single use, percent + expiry
-  from `settings._id="review_coupon"` (`GET/PUT /api/admin/settings/reviews`, defaults on/5%/7 days).
-  Issued at submit, kept even if the review is later declined. Event Pass exclusion is inherited —
-  verified: 5% on a $14.99 + $2.99 pass cart discounts only $14.99.
-- `sweep_auto_coupons()` runs on every admin coupon list and each issuance, deleting auto rows that
-  are redeemed or past expiry; `record_redemption` deletes an auto row the moment it is used.
-- Frontend: `ReviewDialog` (stars, title, body counter, Turnstile, thank-you + coupon), `/reviews`
-  page + nav link, `ReviewCarousel` (3 at a time, rotates every 7s, right-aligned under Phase Two),
-  admin Reviews tab, and Manual / Auto-Generated tabs inside the existing coupon section.
-- Seeded the owner's single test review (Test / "Just A Test" / 5★, approved) via
-  `scripts/seed_test_review.py`.
-
-## Testing
-Latest: `/app/test_reports/iteration_12.json` — 134/134 in-scope backend tests, all frontend
-assertions passing. Backend test files must be run ONE FILE AT A TIME (pytest.ini forces xdist).
-
-## Deployment notes (2026-06)
-- Production deploy failed because the FastAPI startup handler created indexes + seeded data
-  inline: Atlas returned `User writes blocked, reason: DiskUseThresholdExceeded` (code 371) and
-  the app aborted startup, so the pod crashlooped. Startup now iterates an `INDEXES` table with
-  a per-index try/except (one blocked index no longer skips the others) and `seed_data()` is
-  separately guarded, so the app always boots and serves reads on a read-only database.
-  Verified by stubbing every write to raise OperationFailure 371: `startup()` completes and logs
-  one error per index.
-- Added a plain `GET /health` route (the container's nginx probes `127.0.0.1:8001/health`,
-  which previously had no handler); `/api/health` also added.
-- `.gitignore` no longer excludes `.env` files (deployment scan flagged it as a blocker).
-- **The Atlas cluster is out of disk.** Until storage is freed/upgraded, writes (orders,
-  waitlist signups, coupon redemptions) will fail in production even though the app boots.
-
-## Credentials
-See `/app/memory/test_credentials.md`.
+- P0: Live Cash App order end-to-end on production, confirm confirmation email lands
+- P1: Self-serve customer password reset
+- P1: Flip a Coming Soon product live + email its whole waitlist in one click
+- P2: Canned replies in admin chat
+- P2: Abandoned checkout discount nudge
+- P2: Scheduled flash sales (auto on/off dates)
+- Tech debt: server.py ~1,740 lines — split reviews/coupons into routers; approve_review is not
+  concurrency-safe (two simultaneous approvals could double-issue) — use find_one_and_update
+  guarded on status == "pending".

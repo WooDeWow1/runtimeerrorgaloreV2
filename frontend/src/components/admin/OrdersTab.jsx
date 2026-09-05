@@ -1,11 +1,11 @@
-import { Eye } from "lucide-react";
+import { Eye, Trash2 } from "lucide-react";
 import { money } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { OrderChat } from "@/components/OrderChat";
 
 const STATUSES = ["pending", "processing", "completed", "cancelled"];
 
-export const OrdersTab = ({ orders, creds, openOrder, onOpenChat, onSetStatus, onReveal }) => (
+export const OrdersTab = ({ orders, creds, openOrder, onOpenChat, onSetStatus, onReveal, onDelete }) => (
   <div className="mt-10 space-y-5" data-testid="admin-orders-list">
     {orders.length === 0 && <p className="text-xs text-zinc-600">No orders yet.</p>}
     {orders.map((o) => (
@@ -80,6 +80,13 @@ export const OrdersTab = ({ orders, creds, openOrder, onOpenChat, onSetStatus, o
             }`}
           >
             {openOrder === o.id ? "Hide chat" : "Open chat"}
+          </button>
+          <button
+            data-testid={`delete-order-${o.id}`}
+            onClick={() => onDelete(o.id)}
+            className="ml-auto flex items-center gap-2 border border-zinc-800 px-3 py-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-500 transition-colors hover:border-[#ff3b30] hover:text-[#ff3b30]"
+          >
+            <Trash2 className="h-3 w-3" /> Delete
           </button>
         </div>
 
