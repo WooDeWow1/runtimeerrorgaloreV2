@@ -50,6 +50,17 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   The original report ("Turnstile blocks Submit") was actually the 150-character minimum leaving
   the button disabled with no explanation.
 
+- **Jun 2026 — commercial launch reconfiguration**: catalog_sync matches by `sellauth_product_id`
+  (name is fallback only) and syncs `variants`, so re-syncs update instead of duplicating; sync
+  refuses to run when the target host equals the serving host (no production → production push);
+  POST /api/products returns 409 on a duplicate name and `products.name` has a unique index;
+  categories are now Pokécoins, Hunting Service, Event Passes, PokéLid Stamp Rally, Platinum
+  Medals, Stardust (shundo_service category deleted, both Shundo products moved into
+  hunting_service, still Coming Soon); new Hunting Service inventory seeded from live SellAuth
+  data — Auto Raid Hunting (870739, 4 variants), Egg Hatching (870828, 3 variants), Team GO
+  Rocket — Shiny Shadow Hunting (870940, 7 variants, Coming Soon). Descriptions stay editable via
+  Admin > Products. Verified: iteration_20.json (20/20 backend + all frontend flows green).
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

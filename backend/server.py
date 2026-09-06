@@ -299,12 +299,11 @@ async def refresh(request: Request, response: Response):
 # ---------------- Categories ----------------
 SEED_CATEGORIES = [
     {"key": "pokecoin_bundle", "label": "Pokécoins", "note": "Required for passes"},
+    {"key": "hunting_service", "label": "Hunting Service", "note": "Operator fleet"},
     {"key": "event_pass", "label": "Event Passes", "note": "Bundle required"},
     {"key": "pokelid", "label": "PokéLid Stamp Rally", "note": "Account login service"},
     {"key": "medals", "label": "Platinum Medals", "note": "Standalone or bundled"},
     {"key": "stardust", "label": "Stardust", "note": "Farmed by operators"},
-    {"key": "shundo_service", "label": "Shundo Hunting (Waitlist)", "note": "Operator fleet",
-     "coming_soon": True},
 ]
 
 
@@ -425,7 +424,11 @@ async def list_products(
 @api.post("/products")
 async def create_product(payload: ProductIn, admin: dict = Depends(get_admin_user)):
     await assert_category(payload.category)
+    name = payload.name.strip()
+    if await db.products.find_one({"name": name}):
+        raise HTTPException(status_code=409, detail=f"A product named “{name}” already exists")
     data = payload.model_dump()
+    data["name"] = name
     data.update(await sellauth_fields(payload.sellauth_product_id))
     product = Product(**data)
     result = await db.products.insert_one(product.to_mongo())
@@ -1191,25 +1194,29 @@ async def update_banner(payload: BannerSettings, admin: dict = Depends(get_admin
 
 
 # ---------------- Catalog sync (preview -> production) ----------------
-async def _sync_catalog(apply: bool) -> dict:
+async def _sync_catalog(apply: bool, own_host: str = "") -> dict:
     docs = await db.products.find().sort("name", 1).to_list(500)
     source = [Product.from_mongo(d).model_dump(by_alias=False) for d in docs]
     try:
-        return await catalog_sync.plan(source, apply=apply)
+        return await catalog_sync.plan(source, apply=apply, own_host=own_host)
     except catalog_sync.SyncError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach production: {exc}")
 
 
+def request_host(request: Request) -> str:
+    return (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").strip()
+
+
 @api.get("/admin/sync/catalog")
-async def sync_catalog_preview(admin: dict = Depends(get_admin_user)):
-    return await _sync_catalog(apply=False)
+async def sync_catalog_preview(request: Request, admin: dict = Depends(get_admin_user)):
+    return await _sync_catalog(apply=False, own_host=request_host(request))
 
 
 @api.post("/admin/sync/catalog")
-async def sync_catalog_apply(admin: dict = Depends(get_admin_user)):
-    return await _sync_catalog(apply=True)
+async def sync_catalog_apply(request: Request, admin: dict = Depends(get_admin_user)):
+    return await _sync_catalog(apply=True, own_host=request_host(request))
 
 
 # ---------------- Review reward coupons (extends the existing coupon engine) ----------------
@@ -1656,6 +1663,7 @@ INDEXES = [
     ("visits", [("ip", 1), ("day", 1)], {"unique": True}),
     ("webhook_events", "event_key", {"unique": True}),
     ("categories", "key", {"unique": True}),
+    ("products", "name", {"unique": True}),
     ("coupons", "code", {"unique": True}),
     ("coupon_redemptions", [("code", 1), ("email", 1)], {"unique": True}),
     ("reviews", "order_id", {"unique": True}),
@@ -1676,6 +1684,35 @@ POKELID_DESCRIPTION = (
     "guarantee how many shinies anyone will get, it’s all RNG)"
 )
 
+AUTO_RAID_DESCRIPTION = (
+    "We run raids on your account and battle your chosen raid targets.\n"
+    "Pick 1 to 10 Pokemon you want us to prioritize, with how many of each Pokemon!\n\n"
+    "Before you order: your account must have enough Raid Passes to cover the tier you buy. "
+    "We cannot complete raids without them. Raid Passes are not included.\n\n"
+    "Requires a 2 hour gap since your last catch or PokéStop spin before we begin, and a 2 hour "
+    "wait after we finish. Full instructions are sent right after checkout."
+)
+
+EGG_HATCHING_DESCRIPTION = (
+    "We hatch your eggs for you. No cooldown, no walking, no waiting.\n\n"
+    "Before you order: your account needs enough Incubators to cover the eggs you want hatched, "
+    "and eggs in your inventory ready to go. Super Incubators speed things up. Tell us which egg "
+    "distances to prioritize and we'll load those first.\n\n"
+    "You keep everything that hatches, including shinies and hundos."
+)
+
+SHINY_SHADOW_DESCRIPTION = (
+    "Targeted Team GO Rocket hunting until we secure you a shiny Shadow Pokemon.\n\n"
+    "Choose the grunt type you want us to target. You receive one shiny Shadow Pokemon from that "
+    "grunt's encounter pool.\n\n"
+    "Important: grunts carry a rotating set of Pokemon, so we cannot guarantee one specific "
+    "species. Choosing a Fire-type grunt gets you a shiny Shadow from that grunt's current "
+    "lineup, not a Pokemon of your choosing.\n\n"
+    "Rocket Leader targets are available if your account has the required Rocket Radars.\n\n"
+    "Requires a 2 hour gap since your last catch or spin before we begin, and a 2 hour wait "
+    "after we finish."
+)
+
 EXTRA_PRODUCTS = [
     {"name": "Japan PokéLid Stamp Rally Collection", "category": "pokelid", "price": 24.99,
      "description": POKELID_DESCRIPTION, "image_url": "/images/japanlid.jpg",
@@ -1687,6 +1724,16 @@ EXTRA_PRODUCTS = [
      "description": "Value Varies / 1x GO Pass Mega Finale\n\n"
                     "Requires a Pokécoin bundle in cart to purchase!",
      "image_url": "/images/go-pass.png", "sellauth_product_id": 864451, "badge": "Mega Finale"},
+    {"name": "Auto Raid Hunting", "category": "hunting_service", "price": 24.99,
+     "description": AUTO_RAID_DESCRIPTION, "image_url": "/images/autoraid.jpeg",
+     "sellauth_product_id": 870739, "badge": "Raid Service"},
+    {"name": "Egg Hatching", "category": "hunting_service", "price": 29.99,
+     "description": EGG_HATCHING_DESCRIPTION, "image_url": "/images/Eggs.jpeg",
+     "sellauth_product_id": 870828, "badge": "Hatch Service"},
+    {"name": "Team GO Rocket — Shiny Shadow Hunting", "category": "hunting_service",
+     "price": 100.00, "description": SHINY_SHADOW_DESCRIPTION,
+     "image_url": "/images/shinyshadow.jpeg", "sellauth_product_id": 870940,
+     "badge": "Shiny Shadow", "coming_soon": True},
 ]
 
 
@@ -1694,6 +1741,13 @@ SEED_VARIANTS = {
     851924: [(1508676, "Basic"), (1553265, "+ 6 Ranks"), (1553266, "Ultra Box")],
     851928: [(1508694, "Basic"), (1553263, "+10 Ranks"), (1553264, "Ultra Box")],
     864451: [(1570359, "Basic"), (1570360, "+ 10 Ranks"), (1570361, "Ultra Box")],
+    870739: [(1613376, "25 Raids"), (1613377, "50 Raids"), (1613378, "75 Raids"),
+             (1613379, "100 Raids")],
+    870828: [(1613752, "9 Eggs"), (1613753, "27 Eggs"), (1613754, "54 Eggs")],
+    870940: [(1614148, "25 Grunt Battles"), (1614149, "50 Grunt Battles"),
+             (1614150, "100 Grunt Battles"), (1614151, "10 Leader Battles"),
+             (1614152, "25 Leader Battles"), (1614153, "50 Leader Battles"),
+             (1614154, "Up to 5x Giovanni Battles")],
 }
 
 
@@ -1723,6 +1777,16 @@ async def seed_variants():
         )
 
 
+async def migrate_hunting_category():
+    """Shundo Hunting became a product line inside the wider Hunting Service category."""
+    moved = await db.products.update_many({"category": "shundo_service"},
+                                          {"$set": {"category": "hunting_service"}})
+    if moved.modified_count:
+        logger.info("Moved %s product(s) into hunting_service", moved.modified_count)
+    if await db.products.count_documents({"category": "shundo_service"}) == 0:
+        await db.categories.delete_one({"key": "shundo_service"})
+
+
 async def seed_data():
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]
@@ -1747,17 +1811,22 @@ async def seed_data():
     for n, entry in enumerate(SEED_CATEGORIES):
         await db.categories.update_one(
             {"key": entry["key"]},
-            {"$setOnInsert": {**entry, "order": n, "coming_soon": entry.get("coming_soon", False),
+            {"$set": {"order": n},
+             "$setOnInsert": {**entry, "coming_soon": entry.get("coming_soon", False),
                               "created_at": utc_now()}},
             upsert=True,
         )
 
     for entry in EXTRA_PRODUCTS:
-        if await db.products.find_one({"name": entry["name"]}):
+        if await db.products.find_one(
+            {"$or": [{"name": entry["name"]},
+                     {"sellauth_product_id": entry.get("sellauth_product_id")}]}
+        ):
             continue
         data = {**entry, **await sellauth_fields(entry.get("sellauth_product_id"))}
         await db.products.insert_one(Product(**data).to_mongo())
 
+    await migrate_hunting_category()
     await seed_variants()
 
 
