@@ -62,7 +62,7 @@ export const ProductDetailDialog = ({
             >
               {variants.map((v) => (
                 <option key={v.sellauth_variant_id} value={v.sellauth_variant_id}>
-                  {`${v.label} — ${money(v.price)}`}
+                  {`${v.label} — ${money(v.price)}${v.badge ? ` · ${v.badge}` : ""}`}
                 </option>
               ))}
             </select>

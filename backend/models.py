@@ -65,6 +65,7 @@ class ProductVariant(BaseModel):
     label: str = Field(min_length=1, max_length=60)
     sellauth_variant_id: int
     price: float = Field(gt=0)
+    badge: str = Field(default="", max_length=12)
 
 
 class ProductIn(BaseModel):

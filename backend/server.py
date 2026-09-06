@@ -1702,13 +1702,14 @@ EGG_HATCHING_DESCRIPTION = (
 )
 
 SHINY_SHADOW_DESCRIPTION = (
-    "Targeted Team GO Rocket hunting until we secure you a shiny Shadow Pokemon.\n\n"
-    "Choose the grunt type you want us to target. You receive one shiny Shadow Pokemon from that "
-    "grunt's encounter pool.\n\n"
-    "Important: grunts carry a rotating set of Pokemon, so we cannot guarantee one specific "
-    "species. Choosing a Fire-type grunt gets you a shiny Shadow from that grunt's current "
-    "lineup, not a Pokemon of your choosing.\n\n"
-    "Rocket Leader targets are available if your account has the required Rocket Radars.\n\n"
+    "Targeted Team GO Rocket battles run on your account. Pick the number of Grunt or Leader "
+    "battles you want us to fight and we hunt for shiny Shadow Pokémon the whole way through.\n\n"
+    "Choose the grunt type you want us to target. Every shiny Shadow we encounter stays on your "
+    "account.\n\n"
+    "Important: grunts carry a rotating set of Pokémon, so we cannot guarantee one specific "
+    "species. Choosing a Fire-type grunt gets you shiny Shadows from that grunt's current "
+    "lineup, not a Pokémon of your choosing.\n\n"
+    "Rocket Leader battles require your account to have the necessary Rocket Radars.\n\n"
     "Requires a 2 hour gap since your last catch or spin before we begin, and a 2 hour wait "
     "after we finish."
 )
@@ -1744,11 +1745,35 @@ SEED_VARIANTS = {
     870739: [(1613376, "25 Raids"), (1613377, "50 Raids"), (1613378, "75 Raids"),
              (1613379, "100 Raids")],
     870828: [(1613752, "9 Eggs"), (1613753, "27 Eggs"), (1613754, "54 Eggs")],
-    870940: [(1614148, "25 Grunt Battles"), (1614149, "50 Grunt Battles"),
-             (1614150, "100 Grunt Battles"), (1614151, "10 Leader Battles"),
-             (1614152, "25 Leader Battles"), (1614153, "50 Leader Battles"),
-             (1614154, "Up to 5x Giovanni Battles")],
+    870940: [(1614148, "100 Grunt Battles"), (1614149, "250 Grunt Battles"),
+             (1614150, "500 Grunt Battles"), (1614151, "800 Grunt Battles"),
+             (1614152, "10 Leader Battles"), (1614153, "25 Leader Battles"),
+             (1614154, "50 Leader Battles")],
 }
+
+# Team GO Rocket was re-tiered after launch: Giovanni is gone and the battle counts changed,
+# so this line-up is re-applied on every boot instead of only being seeded once.
+ROCKET_VARIANTS = [
+    {"sellauth_variant_id": 1614148, "label": "100 Grunt Battles", "price": 24.99, "badge": ""},
+    {"sellauth_variant_id": 1614149, "label": "250 Grunt Battles", "price": 49.99, "badge": ""},
+    {"sellauth_variant_id": 1614150, "label": "500 Grunt Battles", "price": 84.99, "badge": ""},
+    {"sellauth_variant_id": 1614151, "label": "800 Grunt Battles", "price": 119.99, "badge": "MAX"},
+    {"sellauth_variant_id": 1614152, "label": "10 Leader Battles", "price": 29.99, "badge": ""},
+    {"sellauth_variant_id": 1614153, "label": "25 Leader Battles", "price": 64.99, "badge": ""},
+    {"sellauth_variant_id": 1614154, "label": "50 Leader Battles", "price": 119.99, "badge": ""},
+]
+
+
+async def migrate_rocket_variants():
+    doc = await db.products.find_one({"sellauth_product_id": 870940})
+    if not doc:
+        return
+    await db.products.update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"variants": ROCKET_VARIANTS, "description": SHINY_SHADOW_DESCRIPTION,
+                  "price": ROCKET_VARIANTS[0]["price"],
+                  "sellauth_variant_id": ROCKET_VARIANTS[0]["sellauth_variant_id"]}},
+    )
 
 
 async def seed_variants():
@@ -1828,6 +1853,7 @@ async def seed_data():
 
     await migrate_hunting_category()
     await seed_variants()
+    await migrate_rocket_variants()
 
 
 @app.on_event("shutdown")

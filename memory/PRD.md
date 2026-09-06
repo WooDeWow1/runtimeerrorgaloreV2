@@ -61,6 +61,12 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   Rocket — Shiny Shadow Hunting (870940, 7 variants, Coming Soon). Descriptions stay editable via
   Admin > Products. Verified: iteration_20.json (20/20 backend + all frontend flows green).
 
+- **Jun 2026 — Rocket re-tier**: Team GO Rocket variants re-applied on every boot
+  (`ROCKET_VARIANTS` / `migrate_rocket_variants`): Giovanni removed; grunts are now 100/250/500/800
+  Battles at $24.99/$49.99/$84.99/$119.99 (800 carries a `MAX` badge — new optional `badge` field on
+  ProductVariant, shown in both variant selects); leaders 10/25/50 at $29.99/$64.99/$119.99;
+  description rewritten to the "Targeted Team GO Rocket battles…" copy.
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a
