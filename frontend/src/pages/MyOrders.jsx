@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { MessageSquare, Star } from "lucide-react";
+import { MessageSquare, Share2, Star } from "lucide-react";
 import { api, money } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { OrderChat } from "@/components/OrderChat";
 import { ReviewDialog } from "@/components/ReviewDialog";
+import { ReferEarn } from "@/components/ReferEarn";
 import { useAuth } from "@/context/AuthContext";
 
 const ACTIVE = ["pending", "processing", "awaiting_payment"];
@@ -82,6 +83,7 @@ export default function MyOrders() {
   const [openChat, setOpenChat] = useState(null);
   const [reviewed, setReviewed] = useState({});
   const [reviewOrder, setReviewOrder] = useState(null);
+  const [tab, setTab] = useState("orders");
 
   // Which completed orders already carry a review, so the button becomes a confirmation.
   const loadReviewStatus = useCallback((list) => {
@@ -192,6 +194,35 @@ export default function MyOrders() {
         </p>
       )}
 
+      {user && (
+        <div className="mt-10 flex gap-2 border-b border-[#1f1f1f]">
+          {[
+            { key: "orders", label: "Orders" },
+            { key: "refer", label: "Refer & earn" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              data-testid={`tab-${t.key}`}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-5 py-3 text-[10px] uppercase tracking-[0.25em] transition-colors ${
+                tab === t.key
+                  ? "border-b-2 border-[#00ffcc] text-[#00ffcc]"
+                  : "text-zinc-500 hover:text-white"
+              }`}
+            >
+              {t.key === "refer" && <Share2 className="h-3 w-3" />}
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "refer" && user ? (
+        <div className="mt-10">
+          <ReferEarn />
+        </div>
+      ) : (
+        <>
       <section className="mt-14">
         <h2 className="mb-6 text-[10px] uppercase tracking-[0.3em] text-zinc-500">Active orders</h2>
         <div className="space-y-4">
@@ -217,6 +248,8 @@ export default function MyOrders() {
             {other.map((o) => <Row key={o.id} o={o} />)}
           </div>
         </section>
+      )}
+        </>
       )}
     </div>
   );

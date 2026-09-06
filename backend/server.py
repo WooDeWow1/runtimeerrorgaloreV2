@@ -48,6 +48,7 @@ from models import (  # noqa: E402
     Order,
     OrderItem,
     PasswordChangeRequest,
+    PayoutRequest,
     Product,
     ProductIn,
     ProductUpdate,
@@ -67,6 +68,7 @@ from security import (  # noqa: E402
 )
 import catalog_sync  # noqa: E402
 import sellauth  # noqa: E402
+import sellauth_affiliate  # noqa: E402
 import turnstile  # noqa: E402
 from emailer import (  # noqa: E402
     admin_order_url,
@@ -734,6 +736,24 @@ def sellauth_cart(items: List[OrderItem], unit_prices: dict) -> list[dict]:
     return cart
 
 
+async def attribution_code(ref: Optional[str], has_coupon: bool) -> Optional[str]:
+    """One discount per order: if the buyer already used our coupon we drop the referral code,
+    because a tier with a buyer discount would hand them a second one on SellAuth's side."""
+    code = (ref or "").strip().upper()[:16]
+    if not code:
+        return None
+    if not has_coupon:
+        return code
+    try:
+        tier = await sellauth_affiliate.default_tier()
+        if sellauth_affiliate.commission_range(tier)["buyer_discount_percent"] > 0:
+            return None
+    except Exception as exc:
+        logger.warning("Could not read affiliate tier, dropping referral: %s", exc)
+        return None
+    return code
+
+
 @api.post("/orders/checkout")
 async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_optional_user)):
     if not payload.items:
@@ -756,6 +776,7 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
         "subtotal": priced["subtotal"],
         "discount": priced["discount"],
         "coupon_code": coupon_code,
+        "ref": (payload.ref or "").strip().upper()[:16] or None,
         "user_id": user_id,
         "email": email,
         "origin_url": payload.origin_url.rstrip("/"),
@@ -771,6 +792,7 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     try:
         checkout_data = await sellauth.create_checkout(
             items=sellauth_cart(items, priced["unit_prices"]), email=email, session_id=session_id,
+            affiliate_code=await attribution_code(payload.ref, bool(coupon_code)),
         )
     except sellauth.SellAuthError as exc:
         # 4xx so the real reason reaches the buyer: proxies replace 5xx bodies with their own page.
@@ -975,6 +997,150 @@ async def checkout_session_status(session_id: str):
         "order_id": session.get("order_id"),
         "expires_at": session.get("expires_at"),
     }
+
+
+PAYOUT_METHODS = {
+    "cashapp": "Cash App",
+    "btc": "Bitcoin (BTC)",
+    "sol": "Solana (SOL)",
+    "ltc": "Litecoin (LTC)",
+    "usdc": "USDC",
+}
+PAYOUT_FLOOR = 10.0
+
+
+async def linked_customer_id(user: dict) -> Optional[int]:
+    """Resolve this user's SellAuth customer once, then remember it. Their site email may later
+    change, and older orders may have been placed under a different address, so both are tried."""
+    if user.get("sellauth_customer_id"):
+        return int(user["sellauth_customer_id"])
+
+    emails = [user["email"].lower()]
+    for row in await db.orders.find({"user_id": str(user["_id"])}, {"user_email": 1}).to_list(200):
+        candidate = (row.get("user_email") or "").lower()
+        if candidate and candidate not in emails:
+            emails.append(candidate)
+
+    for email in emails:
+        customer = await sellauth_affiliate.find_customer(email)
+        if customer:
+            await db.users.update_one({"_id": user["_id"]},
+                                      {"$set": {"sellauth_customer_id": int(customer["id"])}})
+            return int(customer["id"])
+    return None
+
+
+def affiliate_view(detail: dict, tier: dict, shop: dict) -> dict:
+    affiliate = detail.get("affiliate") or {}
+    code = affiliate.get("affiliate_code") or ""
+    open_request = next((p for p in detail.get("payout_requests") or []
+                         if str(p.get("status", "")).lower() in ("pending", "open", "0")), None)
+    return {
+        "is_affiliate": bool(code),
+        "code": code,
+        "link": sellauth_affiliate.referral_link(code) if code else "",
+        "balance": float(affiliate.get("affiliate_balance") or 0),
+        "lifetime_earnings": float(affiliate.get("affiliate_referrer_earnings") or 0),
+        "referrals_count": int(affiliate.get("referrals_count") or 0),
+        "attributed_orders": len(detail.get("attributed_invoices") or []),
+        "commission": sellauth_affiliate.commission_range(tier),
+        "payout": {
+            "enabled": bool(shop.get("payouts_enabled")),
+            "min_amount": max(PAYOUT_FLOOR, float(shop.get("payout_min_amount") or 0)),
+            "methods": PAYOUT_METHODS,
+            "open_request": open_request,
+        },
+        "attribution_window_days": int(shop.get("attribution_window_days") or 0),
+    }
+
+
+@api.get("/affiliate/me")
+async def my_affiliate(user: dict = Depends(get_current_user)):
+    """Scoped to the caller's own record only — no customer id is ever accepted from the client."""
+    try:
+        shop = await sellauth_affiliate.settings()
+        tier = await sellauth_affiliate.default_tier()
+        if not shop.get("enabled"):
+            return {"program_enabled": False}
+        customer_id = await linked_customer_id(user)
+        detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    view = affiliate_view(detail or {}, tier, shop)
+    view["program_enabled"] = True
+    return view
+
+
+@api.post("/affiliate/enroll")
+async def enroll_affiliate(user: dict = Depends(get_current_user)):
+    """Open enrollment: create or reuse the SellAuth customer and give them a code on the
+    default tier, so the per-product commission overrides apply."""
+    try:
+        shop = await sellauth_affiliate.settings()
+        if not shop.get("enabled"):
+            raise HTTPException(status_code=400, detail="The affiliate program is not open yet")
+        tier = await sellauth_affiliate.default_tier()
+        if not tier.get("id"):
+            raise HTTPException(status_code=400, detail="No affiliate tier is configured")
+
+        customer_id = await linked_customer_id(user)
+        detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
+        if detail and (detail.get("affiliate") or {}).get("affiliate_code"):
+            return affiliate_view(detail, tier, shop) | {"program_enabled": True}
+
+        code = sellauth_affiliate.new_code(user.get("name") or user["email"])
+        try:
+            await sellauth_affiliate.invite_affiliate(user["email"], code, int(tier["id"]))
+        except sellauth.SellAuthError as exc:
+            if "valid email" in str(exc).lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail="We could not sign that email address up. Please use a different one.",
+                )
+            raise exc
+        customer = await sellauth_affiliate.find_customer(user["email"])
+        if customer:
+            await db.users.update_one({"_id": user["_id"]},
+                                      {"$set": {"sellauth_customer_id": int(customer["id"])}})
+            detail = await sellauth_affiliate.get_affiliate(int(customer["id"]))
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return affiliate_view(detail or {}, tier, shop) | {"program_enabled": True}
+
+
+def payout_details_line(payload: PayoutRequest) -> str:
+    label = PAYOUT_METHODS[payload.method]
+    destination = payload.destination.strip()
+    if payload.method == "usdc":
+        if not payload.chain.strip():
+            raise HTTPException(status_code=400, detail="USDC payouts need the chain as well")
+        return f"{label} ({payload.chain.strip()}): {destination}"
+    return f"{label}: {destination}"
+
+
+@api.post("/affiliate/payout")
+async def request_affiliate_payout(payload: PayoutRequest, user: dict = Depends(get_current_user)):
+    """The payout is executed with a token minted for this user's own customer id, so a caller
+    can never move another affiliate's balance."""
+    details = payout_details_line(payload)
+    try:
+        shop = await sellauth_affiliate.settings()
+        minimum = max(PAYOUT_FLOOR, float(shop.get("payout_min_amount") or 0))
+        if payload.amount < minimum:
+            raise HTTPException(status_code=400,
+                                detail=f"The minimum payout is ${minimum:.2f}")
+        customer_id = await linked_customer_id(user)
+        detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
+        affiliate = (detail or {}).get("affiliate") or {}
+        if not affiliate.get("affiliate_code"):
+            raise HTTPException(status_code=400, detail="You are not an affiliate yet")
+        if payload.amount > float(affiliate.get("affiliate_balance") or 0):
+            raise HTTPException(status_code=400, detail="That is more than your affiliate balance")
+        result = await sellauth_affiliate.request_payout(customer_id, payload.amount, details)
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "message": result.get("message") or "Payout requested"}
 
 
 @api.get("/orders")

@@ -212,6 +212,14 @@ class CheckoutRequest(BaseModel):
     origin_url: str
     email: Optional[EmailStr] = None
     coupon_code: Optional[str] = None
+    ref: Optional[str] = Field(default=None, max_length=16)
+
+
+class PayoutRequest(BaseModel):
+    amount: float = Field(gt=0)
+    method: Literal["cashapp", "btc", "sol", "ltc", "usdc"]
+    destination: str = Field(min_length=3, max_length=200)
+    chain: str = Field(default="", max_length=40)
 
 
 class Order(BaseDocument):

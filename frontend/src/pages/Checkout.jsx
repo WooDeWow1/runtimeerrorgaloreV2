@@ -3,8 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, money } from "@/lib/api";
-import { useCart } from "@/context/CartContext";
+import { storedRef } from "@/lib/referral";
 import { useAuth } from "@/context/AuthContext";
+import { useCart } from "@/context/CartContext";
 import { CouponField } from "@/components/CouponField";
 
 const input =
@@ -36,6 +37,7 @@ export default function Checkout() {
         ptc_password: ptcPassword,
         origin_url: window.location.origin,
         ...(coupon ? { coupon_code: coupon.code } : {}),
+        ...(storedRef() ? { ref: storedRef() } : {}),
         ...(isGuest ? { email } : {}),
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);

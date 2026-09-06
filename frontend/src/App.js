@@ -8,6 +8,7 @@ import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { CartDrawer } from "@/components/CartDrawer";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useVisitTracker } from "@/hooks/useVisitTracker";
+import { captureRef } from "@/lib/referral";
 import Home from "@/pages/Home";
 import Products from "@/pages/Products";
 import About from "@/pages/About";
@@ -23,6 +24,7 @@ import Reviews from "@/pages/Reviews";
 
 function App() {
   useVisitTracker();
+  captureRef();
   return (
     <div className="App min-h-screen bg-[#050505] text-white">
       <BrowserRouter>

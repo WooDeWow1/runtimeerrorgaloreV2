@@ -67,6 +67,20 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   ProductVariant, shown in both variant selects); leaders 10/25/50 at $29.99/$64.99/$119.99;
   description rewritten to the "Targeted Team GO Rocket battles…" copy.
 
+- **Jun 2026 — Refer & Earn (SellAuth affiliate)**: new tab on /my-orders showing the customer's
+  referral link, commission range, lifetime earnings, balance and referral count, with Copy,
+  Request Payout and Become a Promoter. Backend `sellauth_affiliate.py` reads via the seller API
+  and performs every customer action through a 5-minute customer-dashboard token minted for that
+  one customer id (never accepted from the client). Identity resolves by site email, then emails
+  from the user's past orders, then persists `sellauth_customer_id` on the user doc. Enrolment
+  uses the default tier (622) so per-product overrides apply; commission is shown as a 0%–10%
+  range with Event Passes named as 0%. Referral capture: `?ref=` stored 30 days
+  (`lib/referral.js`) and sent as `ref` on checkout → passed to SellAuth as `affiliate`, but
+  dropped when our coupon is applied AND the tier carries a buyer discount, so discounts never
+  stack. Payouts: $10 floor, methods Cash App / BTC / SOL / LTC / USDC (+chain).
+  SellAuth shop settings changed via API: `payout_min_amount` 50 → 10, `attribution_window_days`
+  5 → 30. Verified: iteration_21.json (20/20 backend, all frontend flows, no security findings).
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

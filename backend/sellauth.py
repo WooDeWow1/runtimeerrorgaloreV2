@@ -111,7 +111,8 @@ def _checkout_error(resp: httpx.Response) -> SellAuthError:
     return SellAuthError(message or f"SellAuth rejected the checkout ({resp.status_code})")
 
 
-async def create_checkout(*, items: list[dict], email: str, session_id: str) -> dict:
+async def create_checkout(*, items: list[dict], email: str, session_id: str,
+                          affiliate_code: Optional[str] = None) -> dict:
     """Create a SellAuth hosted checkout. Catalog items use the shop's product/variant ids so
     SellAuth owns pricing and stock. Discounted lines carry a `custom_price` and are sent as
     custom items instead, because a catalog price cannot be overridden."""
@@ -121,6 +122,8 @@ async def create_checkout(*, items: list[dict], email: str, session_id: str) -> 
         "currency": "USD",
         "metadata": {"checkout_session_id": session_id},
     }
+    if affiliate_code:
+        payload["affiliate"] = affiliate_code[:16]
     async with httpx.AsyncClient(timeout=25) as client:
         resp = await _post_checkout(client, payload)
     if resp.is_error:
