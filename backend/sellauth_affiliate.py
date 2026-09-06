@@ -145,6 +145,20 @@ async def request_payout(customer_id: int, amount: float, payout_details: str) -
     return resp.json()
 
 
+async def set_code(customer_id: int, code: str) -> dict:
+    """Customer-scoped so a caller can only ever rename their own code."""
+    token = await customer_token(customer_id)
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{CUSTOMER_BASE}/affiliate/edit-code",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            json={"affiliate_code": code},
+        )
+    if resp.is_error:
+        raise _err(resp, "code change")
+    return resp.json()
+
+
 async def cancel_payout(customer_id: int, payout_request_id: int) -> dict:
     token = await customer_token(customer_id)
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
@@ -154,6 +168,44 @@ async def cancel_payout(customer_id: int, payout_request_id: int) -> dict:
         )
     if resp.is_error:
         raise _err(resp, "payout cancel")
+    return resp.json()
+
+
+async def list_affiliates(per_page: int = 100) -> list[dict]:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliates",
+                                headers=_headers(), params={"perPage": per_page})
+    if resp.is_error:
+        raise _err(resp, "affiliate list")
+    return resp.json().get("data") or []
+
+
+async def program_stats() -> dict:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliates/stats",
+                                headers=_headers())
+    if resp.is_error:
+        raise _err(resp, "affiliate stats")
+    return resp.json()
+
+
+async def tiers() -> list[dict]:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliate-tiers",
+                                headers=_headers())
+    if resp.is_error:
+        raise _err(resp, "tier list")
+    return resp.json() or []
+
+
+async def assign_tier(customer_id: int, tier_id: int) -> dict:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.put(
+            f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliates/{int(customer_id)}/tier",
+            headers=_headers(), json={"tier_id": int(tier_id)},
+        )
+    if resp.is_error:
+        raise _err(resp, "tier assign")
     return resp.json()
 
 

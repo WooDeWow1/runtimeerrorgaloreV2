@@ -80,6 +80,20 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   stack. Payouts: $10 floor, methods Cash App / BTC / SOL / LTC / USDC (+chain).
   SellAuth shop settings changed via API: `payout_min_amount` 50 → 10, `attribution_window_days`
   5 → 30. Verified: iteration_21.json (20/20 backend, all frontend flows, no security findings).
+- **Jun 2026 — promoter leaderboard + share buttons**: Admin `promoters` tab
+  (`components/admin/AffiliatesTab.jsx`, `GET /api/admin/affiliates`) ranks affiliates by lifetime
+  earnings then referrals with program stats, medals on the top three, and a tier dropdown
+  (`PUT /api/admin/affiliates/{customer_id}/tier`, returns 400 not 502 so the SellAuth message
+  survives Cloudflare). Customer panel gained one-tap sharing (`components/ShareButtons.jsx`):
+  X tweet intent plus copy-caption for Discord and TikTok, all clipboard-failure safe.
+  Verified: iteration_22.json (8/8 new + 20/20 regression backend, all frontend flows).
+- **Jun 2026 — custom affiliate codes**: `POST /api/affiliate/code` lets a promoter claim their own
+  handle once (`CodeChangeRequest`, 3–16 chars, `^[A-Za-z0-9_-]+$`, upper-cased), executed with a
+  customer-scoped SellAuth token via `set_code()`. A second attempt is refused with 400 and never
+  reaches SellAuth; duplicate codes surface SellAuth's readable message. `/affiliate/me` exposes
+  `code_editable` and `code_change_used`; the panel shows "Edit my code" until used, then
+  "personalised" (`EditCodeDialog.jsx`, refetches `/affiliate/me` after saving).
+  Verified: iteration_23.json (11/11 new + 28/28 regression), stale-flag bug from that run fixed.
 
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,

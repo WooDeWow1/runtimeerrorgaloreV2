@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 23 — Custom Affiliate Codes (POST /api/affiliate/code) end-to-end. Backend: added /app/backend/tests/test_affiliate_code_v23.py (11 cases, all pass) covering auth-gate (401), full validation matrix (422 for length <3 / >16 / spaces / special chars, model accepts A-Z 0-9 _ -), 'not a promoter yet' (400), /affiliate/me exposes code_editable=true & code_change_used=false before change, happy-path with FRESH mailinator customer changing the code (SellAuth accepts, response reflects new code + https://pokecoins.cc/?ref=NEWCODE link, affiliate_code_changed_at persisted, injection of customer_id/sellauth_customer_id/email in body IGNORED — caller only ever acts on their own linked customer), second POST returns 400 'You have already personalised your code once' and the code stays as the FIRST custom one (SellAuth NOT hit twice), duplicate collision returns readable 400 with SellAuth 'already in use' message (JSON body preserved, not a Cloudflare page), CodeChangeRequest pydantic model unit test. Regression: /app/backend/tests/test_affiliate_v21.py (20/20) + /app/backend/tests/test_admin_affiliates_v22.py (8/8) still green — admin PUT tier now returns 400 with 'AffiliateTier not found' as expected (formerly 502). Frontend Playwright at desktop 1920x1080 + mobile 390x844: fresh user registered + enrolled via API, then /my-orders → tab-refer opens refer-earn-panel, edit-code-btn visible before change and code-locked-note absent (0), edit-code-btn click opens edit-code-dialog, typing 'AB' shows code-invalid-note and Save disabled, typing 'BAD!CODE' shows note and Save disabled, typing valid unique code enables Save, click Save closes dialog and updates referral-link text to https://pokecoins.cc/?ref=<NEWCODE> without a reload, mobile 390px no horizontal overflow. Toast 'Your code is now …' confirmed in screenshot.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/affiliate/code",
+        "issue": "Response body returns stale code_change_used=false immediately after a successful change. Root cause: server.py L1226 calls affiliate_view(detail, tier, shop, user) using the SAME user dict from Depends(get_current_user) — that dict was fetched BEFORE the DB $set of affiliate_code_changed_at (L1220-1221), so the derived flag on L1055 evaluates to False. A subsequent GET /affiliate/me correctly returns code_change_used=true (verified in test_affiliate_code_v23::TestChangeCode). Impact on UX: the frontend passes the POST response straight into setData via onSaved(data) (ReferEarn.jsx L163), so the Edit-my-code button remains visible and code-locked-note stays absent until the page is reloaded or /affiliate/me is refetched. FIX (trivial, 1 line): add `user['affiliate_code_changed_at'] = utc_now()` between L1221 and L1226 so affiliate_view sees the updated value, OR re-read the user doc from Mongo before building the view. Reproduced live: after Save the UI kept edit-code-btn=1 and code-locked-note=0 despite the code and link both updating correctly."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ReferEarn/EditCodeDialog",
+        "issue": "After successful code save, 'Edit my code' button stays visible and 'personalised' note is absent until a page reload. Downstream of the backend stale-flag bug above — no frontend change needed once backend is fixed. Optional belt-and-braces: after onSaved, call load() to refetch /affiliate/me instead of trusting the POST payload.",
+        "selector": "[data-testid=\"edit-code-btn\"] / [data-testid=\"code-locked-note\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_affiliate_code_v23.py",
+    "/app/test_reports/pytest/affiliate_code_v23.xml",
+    "/app/backend/tests/test_affiliate_v21.py",
+    "/app/backend/tests/test_admin_affiliates_v22.py"
+  ],
+  "action_items": [
+    "Fix POST /api/affiliate/code so the response's code_change_used reflects the just-persisted change. One-liner: in server.py change_affiliate_code(), set `user['affiliate_code_changed_at'] = utc_now()` on the in-memory dict before calling affiliate_view (or refetch the user from db.users). Currently the frontend needs a reload to hide the Edit button.",
+    "Optional defence-in-depth: in EditCodeDialog.onSaved / ReferEarn, refresh via GET /affiliate/me after a successful save instead of trusting the POST payload."
+  ],
+  "critical_code_review_comments": [
+    "BUG (see backend_issues.minor): change_affiliate_code() passes stale user dict to affiliate_view.",
+    "GOOD: CodeChangeRequest uses pattern ^[A-Za-z0-9_-]+$ with 3-16 length — pydantic returns 422 for all bad inputs before any SellAuth work is done.",
+    "GOOD: server.py L1210 upper-cases the code before sending to SellAuth (lowercase input is normalised).",
+    "GOOD: The endpoint is scoped by Depends(get_current_user) and resolves customer_id via linked_customer_id(user) — client-supplied customer_id/email in the body are simply ignored by the Pydantic model (extra='ignore'). Verified by test.",
+    "GOOD: SellAuth errors caught and re-raised as HTTPException(400) so Cloudflare doesn't rewrite the body — duplicate-code path returns a readable 'already in use' JSON message.",
+    "GOOD: server.py set_affiliate_tier() was correctly changed from 502 → 400 in this iteration (regression test test_admin_affiliates_v22::test_bogus_tier_id_returns_readable_error_not_500 accepts 400).",
+    "GOOD: sellauth_affiliate.set_code() uses a customer-scoped short-lived token (customer_token mint), so a caller can only ever rename their own code.",
+    "MINOR (carried): server.py is now ~1900 lines; the affiliate block (~250 lines) is a clean extraction candidate to /app/backend/affiliate.py.",
+    "MINOR: EditCodeDialog has DialogContent without an aria-describedby or Description — Radix logs a warning. Not a blocker but adds a11y polish."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_affiliate_code_v23.py (new, 11 cases)"
+  ],
+  "success_rate": {"backend": "100% (11/11 new + 28/28 regression = 39/39)", "frontend": "90% — all validation and happy-path save works; only downstream UI state (edit-btn vs locked-note swap without reload) fails due to backend stale-flag bug."},
+  "test_credentials": "Admin officialwifi@icloud.com / admin (unused for the one-change test to preserve admin code 4LFSA649). Test customers auto-created inline: uicode<hex>@mailinator.com and codechg<hex>@mailinator.com.",
+  "seed_data_creation": "Multiple fresh site users + SellAuth affiliate enrolments on shop 261878 tier 622 via mailinator.com addresses. Each was renamed once via /api/affiliate/code with a unique UI/DUP/TR<hex> code. No checkouts, no payouts, no admin/tier changes to other affiliates, admin's 4LFSA649 untouched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && python -m pytest backend/tests/test_affiliate_code_v23.py backend/tests/test_affiliate_v21.py backend/tests/test_admin_affiliates_v22.py -v. The one bug flagged (stale code_change_used in POST /api/affiliate/code response) is a 1-line fix in server.py change_affiliate_code() — main agent should apply it, then re-run the Playwright section (register→enrol→open edit-code-dialog→save valid code→assert edit-code-btn count == 0 AND code-locked-note count == 1 WITHOUT reload). AuthContext accepts BOTH httpOnly cookie AND localStorage pokeforge_token — Playwright sets both. Route to Refer & Earn tab is /my-orders → data-testid=tab-refer.",
+  "rca_of_the_issue": "server.py change_affiliate_code() (L1204-1226): the request handler receives `user` from Depends(get_current_user), executes SellAuth set_code, does `db.users.update_one({...},{'$set':{'affiliate_code_changed_at': utc_now()}})`, but then builds the response body via affiliate_view(detail, tier, shop, user) — the same `user` dict, which was populated BEFORE the update and therefore does NOT contain the newly-set field. affiliate_view() computes `code_change_used = bool((user or {}).get('affiliate_code_changed_at'))` and returns False. Frontend ReferEarn.jsx trusts the response payload (onSaved passes it to setData), so the UI keeps showing the Edit button and hides the locked note until the next /affiliate/me fetch (e.g. page reload). Mitigation: either (a) mutate the local user dict — `user['affiliate_code_changed_at'] = utc_now()` — before affiliate_view is called; or (b) refetch the user from Mongo; or (c) on the frontend, call load() instead of trusting the POST response. (a) is the smallest, most robust change and mirrors what the DB has just been asked to persist."
+}

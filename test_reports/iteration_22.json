@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 22 — Admin promoter leaderboard + customer ShareButtons. Backend: added /app/backend/tests/test_admin_affiliates_v22.py with 8 cases covering GET /api/admin/affiliates (401 unauth, 403 non-admin, 200 admin + full shape check for stats {total_affiliates, commissions_all_time, attributed_revenue_all_time, attributed_orders, pending_payout_requests, window_days=30}, tiers[], per-row {customer_id,email,code,earnings,balance,referrals,tier_id,tier_name,tier_percent,joined_at}, sort order earnings→referrals desc) and PUT /api/admin/affiliates/{cid}/tier?tier_id=622 (401 unauth, 403 non-admin, 200 admin + verified code/earnings/balance unchanged after reassign, bogus tier_id returns 502 with SellAuth 'AffiliateTier not found' detail — see caveat below). All 8/8 pass. Regression /app/backend/tests/test_affiliate_v21.py: 20/20 still pass (affiliate/me shape, enrol idempotency, ignores client identity, payout $10 min, USDC chain, unknown method 422, attribution_code drop logic, referral_link, new_code ≤16 chars). Frontend Playwright: (a) admin-tab-affiliates renders 4 stat cards (Promoters=10, Commission paid $0.00, Referred revenue $0.00, Referred orders 0), 10 leaderboard rows ranked #1..#10 with code+email+earned+unpaid+referrals+tier dropdown, medals on top 3; (b) tier dropdown change triggers PUT and shows sonner toast 'SHAREUIGAZQHK moved to a new rate'; (c) mobile 390px scrollWidth=clientWidth=390 (no horizontal overflow) on admin tab; (d) ReferEarn panel exposes share-buttons row with share-x-btn, share-discord-btn, share-tiktok-btn; (e) clicking share-x-btn opens a twitter.com/intent/tweet URL (browser redirects to x.com/intent/tweet — same intent) whose text param URL-encoded contains 'https://pokecoins.cc/?ref=<code>'; (f) clicking share-discord-btn and share-tiktok-btn in Playwright's clipboard-denied context does NOT crash the panel — refer-earn-panel remains mounted and all share buttons remain enabled, because copyCaption() in ShareButtons.jsx wraps navigator.clipboard.writeText in try/catch and toasts a friendly error on failure; (g) refer panel mobile 390px no overflow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/admin/affiliates/{cid}/tier", "issue": "Bogus tier_id path raises HTTPException(502, detail='AffiliateTier not found'). Backend behaviour is correct (readable detail, no stack trace) but Cloudflare/edge REPLACES 5xx bodies with a generic HTML '502 Bad gateway' page, so the readable message never reaches the admin UI. The codebase already handles this pattern for /orders/checkout by returning 400 for SellAuth errors (see server.py L797-800 comment: '4xx so the real reason reaches the buyer: proxies replace 5xx bodies with their own page.'). Recommend applying the same pattern in server.py set_affiliate_tier() — raise 400 instead of 502 so the SellAuth error text ('AffiliateTier not found') is preserved by the edge and shown in the admin toast."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_affiliates_v22.py",
+    "/app/backend/tests/test_affiliate_v21.py",
+    "/app/test_reports/pytest/admin_affiliates_v22.xml"
+  ],
+  "action_items": [
+    "OPTIONAL — Change set_affiliate_tier() in server.py to raise HTTPException(400) instead of 502 on SellAuthError, matching the /orders/checkout pattern, so Cloudflare doesn't strip the readable error body. Currently a bogus tier_id shows a generic Cloudflare 502 page instead of 'AffiliateTier not found' in the admin toast.",
+    "OPTIONAL — Consider adding an aria-live region for the promoters leaderboard toast so screen readers pick up the tier-change confirmation."
+  ],
+  "critical_code_review_comments": [
+    "GOOD: admin_affiliates() (server.py L1146) correctly sorts by (earnings, referrals) desc using a tuple key, and correctly does NOT leak MongoDB _id (all fields are explicit).",
+    "GOOD: set_affiliate_tier() (server.py L1190) is guarded by Depends(get_admin_user) so non-admin gets 403, unauth gets 401 — verified by tests.",
+    "GOOD: AffiliatesTab.jsx uses api.put with tier_id as query param (not body), matching the FastAPI signature `set_affiliate_tier(customer_id: int, tier_id: int, admin=...)` where tier_id is a query param — verified working end-to-end (toast success).",
+    "GOOD: ShareButtons.copyCaption() wraps navigator.clipboard.writeText in try/catch and toasts 'Copy blocked by your browser — copy the link above manually' on rejection — panel does NOT crash in sandboxed/embed contexts. This is the fix flagged in iteration 21.",
+    "GOOD: ReferEarn.copy() also wraps writeText in try/catch (iter21 finding fixed).",
+    "MINOR: X share opens `twitter.com/intent/tweet?text=...` (Twitter itself 301s to x.com/intent/tweet). Both hostnames resolve to the same intent page — no action needed, but if you want to future-proof, switch to `x.com/intent/tweet` directly to avoid the redirect.",
+    "MINOR (carried from iter21): server.py has grown to 1836+ lines. The affiliate block (~150 lines) plus the new admin_affiliates block are a clean extraction candidate to /app/backend/affiliate.py.",
+    "SECURITY: verified that PUT /admin/affiliates/{cid}/tier is called with customer_id from the URL path only — no way for a non-admin to elevate; the admin dependency chain enforces it."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_affiliates_v22.py (new, 8 cases)"
+  ],
+  "success_rate": {"backend": "100% (8/8 new + 20/20 regression = 28/28)", "frontend": "100% (promoters tab renders, tier dropdown toast, share buttons X/Discord/TikTok present + X opens intent URL with referral link, clipboard-denied path does not crash panel, mobile 390px no overflow on both admin and refer panels)"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin from /app/memory/test_credentials.md. Test customers created inline as testcust<hex>@mailinator.com and shareui<hex>@mailinator.com (safe trash mailboxes).",
+  "seed_data_creation": "Two new site users (Mongo /users) per run; one new SellAuth affiliate enrolled via real invite (mailinator.com, tier 622). No checkouts, no payouts submitted, no tier changes to any tier other than 622→622 reassign.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run backend: `cd /app && python -m pytest backend/tests/test_admin_affiliates_v22.py backend/tests/test_affiliate_v21.py -v`. Live SellAuth shop 261878, only tier 622 exists — do not create/delete tiers, do not suspend affiliates, do not mark payouts paid. The bogus-tier-id path returns 502 which Cloudflare rewrites — the pytest tolerates this; the ONLY optional improvement is switching that 502 to a 400 in server.py so the admin UI shows the SellAuth error text. AuthContext uses BOTH httpOnly cookie AND localStorage pokeforge_token — Playwright must set both. Twitter intent URL is rewritten by the browser to x.com/intent/tweet; treat both hostnames as valid.",
+  "rca_of_the_issue": "N/A — the two new endpoints and both UI surfaces (AffiliatesTab, ShareButtons) work as specified. The single minor gap is the Cloudflare-502-body-rewrite affecting the bogus-tier-id error path; root cause is server.py raising 502 for upstream SellAuth failure while the codebase's own convention (see /orders/checkout) is to use 400 precisely to survive proxy body-rewriting."
+}

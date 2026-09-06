@@ -48,6 +48,7 @@ from models import (  # noqa: E402
     Order,
     OrderItem,
     PasswordChangeRequest,
+    CodeChangeRequest,
     PayoutRequest,
     Product,
     ProductIn,
@@ -1030,7 +1031,7 @@ async def linked_customer_id(user: dict) -> Optional[int]:
     return None
 
 
-def affiliate_view(detail: dict, tier: dict, shop: dict) -> dict:
+def affiliate_view(detail: dict, tier: dict, shop: dict, user: Optional[dict] = None) -> dict:
     affiliate = detail.get("affiliate") or {}
     code = affiliate.get("affiliate_code") or ""
     open_request = next((p for p in detail.get("payout_requests") or []
@@ -1050,6 +1051,8 @@ def affiliate_view(detail: dict, tier: dict, shop: dict) -> dict:
             "methods": PAYOUT_METHODS,
             "open_request": open_request,
         },
+        "code_editable": bool(shop.get("code_editable")),
+        "code_change_used": bool((user or {}).get("affiliate_code_changed_at")),
         "attribution_window_days": int(shop.get("attribution_window_days") or 0),
     }
 
@@ -1067,7 +1070,7 @@ async def my_affiliate(user: dict = Depends(get_current_user)):
     except sellauth.SellAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    view = affiliate_view(detail or {}, tier, shop)
+    view = affiliate_view(detail or {}, tier, shop, user)
     view["program_enabled"] = True
     return view
 
@@ -1087,7 +1090,7 @@ async def enroll_affiliate(user: dict = Depends(get_current_user)):
         customer_id = await linked_customer_id(user)
         detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
         if detail and (detail.get("affiliate") or {}).get("affiliate_code"):
-            return affiliate_view(detail, tier, shop) | {"program_enabled": True}
+            return affiliate_view(detail, tier, shop, user) | {"program_enabled": True}
 
         code = sellauth_affiliate.new_code(user.get("name") or user["email"])
         try:
@@ -1106,7 +1109,7 @@ async def enroll_affiliate(user: dict = Depends(get_current_user)):
             detail = await sellauth_affiliate.get_affiliate(int(customer["id"]))
     except sellauth.SellAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return affiliate_view(detail or {}, tier, shop) | {"program_enabled": True}
+    return affiliate_view(detail or {}, tier, shop, user) | {"program_enabled": True}
 
 
 def payout_details_line(payload: PayoutRequest) -> str:
@@ -1141,6 +1144,88 @@ async def request_affiliate_payout(payload: PayoutRequest, user: dict = Depends(
     except sellauth.SellAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "message": result.get("message") or "Payout requested"}
+
+
+@api.get("/admin/affiliates")
+async def admin_affiliates(admin: dict = Depends(get_admin_user)):
+    """Leaderboard: who is actually selling, so rates can be raised for the people earning them."""
+    try:
+        rows = await sellauth_affiliate.list_affiliates()
+        stats = await sellauth_affiliate.program_stats()
+        tier_rows = await sellauth_affiliate.tiers()
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    leaderboard = sorted(
+        (
+            {
+                "customer_id": r["id"],
+                "email": r.get("email") or "",
+                "code": r.get("affiliate_code") or "",
+                "earnings": float(r.get("affiliate_referrer_earnings") or 0),
+                "balance": float(r.get("affiliate_balance") or 0),
+                "referrals": int(r.get("referrals_count") or 0),
+                "tier_id": r.get("affiliate_tier_id"),
+                "tier_name": (r.get("affiliate_tier") or {}).get("name") or "—",
+                "tier_percent": float((r.get("affiliate_tier") or {}).get("percentage") or 0),
+                "joined_at": r.get("created_at"),
+            }
+            for r in rows
+        ),
+        key=lambda a: (a["earnings"], a["referrals"]),
+        reverse=True,
+    )
+    return {
+        "affiliates": leaderboard,
+        "tiers": [{"id": t["id"], "name": t["name"], "percentage": float(t["percentage"]),
+                   "is_default": bool(t.get("is_default"))} for t in tier_rows],
+        "stats": {
+            "total_affiliates": stats.get("total_affiliates", 0),
+            "commissions_all_time": float(stats.get("commissions_usd_all_time") or 0),
+            "attributed_revenue_all_time": float(stats.get("attributed_revenue_usd_all_time") or 0),
+            "attributed_orders": stats.get("attributed_orders", 0),
+            "pending_payout_requests": stats.get("pending_payout_requests", 0),
+            "window_days": stats.get("window_days", 0),
+        },
+    }
+
+
+@api.put("/admin/affiliates/{customer_id}/tier")
+async def set_affiliate_tier(customer_id: int, tier_id: int, admin: dict = Depends(get_admin_user)):
+    try:
+        await sellauth_affiliate.assign_tier(customer_id, tier_id)
+    except sellauth.SellAuthError as exc:
+        # 4xx so the real reason survives: proxies replace 5xx bodies with their own page.
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@api.post("/affiliate/code")
+async def change_affiliate_code(payload: CodeChangeRequest, user: dict = Depends(get_current_user)):
+    """One rename per promoter: enough to claim a memorable handle, not enough to churn codes
+    and orphan links people have already shared."""
+    if user.get("affiliate_code_changed_at"):
+        raise HTTPException(status_code=400,
+                            detail="You have already personalised your code once")
+    code = payload.code.strip().upper()
+    try:
+        shop = await sellauth_affiliate.settings()
+        if not shop.get("code_editable"):
+            raise HTTPException(status_code=400, detail="Custom codes are turned off right now")
+        customer_id = await linked_customer_id(user)
+        detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
+        if not (detail or {}).get("affiliate", {}).get("affiliate_code"):
+            raise HTTPException(status_code=400, detail="You are not a promoter yet")
+        await sellauth_affiliate.set_code(customer_id, code)
+        changed_at = utc_now()
+        await db.users.update_one({"_id": user["_id"]},
+                                  {"$set": {"affiliate_code_changed_at": changed_at}})
+        user["affiliate_code_changed_at"] = changed_at
+        detail = await sellauth_affiliate.get_affiliate(customer_id)
+        tier = await sellauth_affiliate.default_tier()
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return affiliate_view(detail or {}, tier, shop, user) | {"program_enabled": True}
 
 
 @api.get("/orders")

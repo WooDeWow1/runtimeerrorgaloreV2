@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { api, apiError, STATUS_LABELS } from "@/lib/api";
 import { useCategories } from "@/lib/useCategories";
 import { CategoriesTab } from "@/components/admin/CategoriesTab";
+import { AffiliatesTab } from "@/components/admin/AffiliatesTab";
 import { CouponsTab } from "@/components/admin/CouponsTab";
 import { OrdersTab } from "@/components/admin/OrdersTab";
 import { ProductsTab } from "@/components/admin/ProductsTab";
@@ -16,6 +17,7 @@ const TABS = [
   { key: "categories", label: "categories" },
   { key: "coupons", label: "discount codes" },
   { key: "reviews", label: "reviews" },
+  { key: "affiliates", label: "promoters" },
   { key: "waitlist", label: "waitlist" },
   { key: "settings", label: "settings & analytics" },
 ];
@@ -267,6 +269,8 @@ export default function Admin() {
       {tab === "categories" && <CategoriesTab categories={categories} reload={reloadCategories} />}
 
       {tab === "reviews" && <ReviewsTab />}
+
+      {tab === "affiliates" && <AffiliatesTab />}
 
       {tab === "coupons" && <CouponsTab categories={categories} />}
 

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, Loader2, Share2, Wallet } from "lucide-react";
+import { Check, Copy, Loader2, Pencil, Share2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, apiError, money } from "@/lib/api";
 import { PayoutDialog } from "@/components/PayoutDialog";
+import { EditCodeDialog } from "@/components/EditCodeDialog";
+import { ShareButtons } from "@/components/ShareButtons";
 
 const Stat = ({ label, value, accent }) => (
   <div className="border border-[#1f1f1f] bg-[#0a0a0a] p-5">
@@ -17,6 +19,7 @@ export const ReferEarn = () => {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [payoutOpen, setPayoutOpen] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -136,9 +139,30 @@ export const ReferEarn = () => {
                 {copied ? "Copied" : "Copy"}
               </button>
             </div>
-            <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+            <p className="mt-3 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
               code {data.code}
+              {data.code_editable && !data.code_change_used && (
+                <button
+                  data-testid="edit-code-btn"
+                  onClick={() => setCodeOpen(true)}
+                  className="flex items-center gap-1.5 border border-zinc-800 px-3 py-1.5 tracking-[0.2em] text-zinc-400 transition-colors hover:border-[#00ffcc] hover:text-[#00ffcc]"
+                >
+                  <Pencil className="h-3 w-3" /> Edit my code
+                </button>
+              )}
+              {data.code_change_used && (
+                <span data-testid="code-locked-note" className="text-zinc-700">
+                  · personalised
+                </span>
+              )}
             </p>
+            <EditCodeDialog
+              open={codeOpen}
+              onOpenChange={setCodeOpen}
+              current={data.code}
+              onSaved={load}
+            />
+            <ShareButtons link={data.link} />
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
