@@ -10,7 +10,7 @@ import { ExplainerVideo } from "@/components/ExplainerVideo";
 import { useCart } from "@/context/CartContext";
 
 const HERO_VIDEO = "/images/video.mp4";
-const HERO_POSTER = "/images/Mainpage.jpg";
+const HERO_POSTER = "/images/video-thumb.png";
 const PSYDUCK = "/images/psyduck.jpg";
 
 export default function Home() {
@@ -35,7 +35,7 @@ export default function Home() {
         <video
           data-testid="hero-video"
           src={HERO_VIDEO}
-          poster={HERO_POSTER}
+          poster="/images/Mainpage.jpg"
           autoPlay
           muted
           loop

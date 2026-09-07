@@ -151,3 +151,7 @@ separately verified outbound domain (iCloud custom domains cannot do API sending
 - Tech debt: server.py ~1,740 lines — split reviews/coupons into routers; approve_review is not
   concurrency-safe (two simultaneous approvals could double-issue) — use find_one_and_update
   guarded on status == "pending".
+
+## 2026-06 Hero video thumbnail
+- Added /app/frontend/public/images/video-thumb.png (shattered-glass $99.99 -> $42.99 art).
+- Set as poster for the hero-card ExplainerVideo in Home.jsx; background loop video keeps Mainpage.jpg poster.
