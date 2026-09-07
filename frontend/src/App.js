@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { Navbar } from "@/components/Navbar";
+import { Footer } from "@/components/Footer";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { CartDrawer } from "@/components/CartDrawer";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -11,7 +12,6 @@ import { useVisitTracker } from "@/hooks/useVisitTracker";
 import { captureRef } from "@/lib/referral";
 import Home from "@/pages/Home";
 import Products from "@/pages/Products";
-import About from "@/pages/About";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Checkout from "@/pages/Checkout";
@@ -20,6 +20,7 @@ import PaymentCancel from "@/pages/PaymentCancel";
 import MyOrders from "@/pages/MyOrders";
 import OrderDetail from "@/pages/OrderDetail";
 import Admin from "@/pages/Admin";
+import Legal from "@/pages/Legal";
 import Vault from "@/pages/Vault";
 import Reviews from "@/pages/Reviews";
 
@@ -37,7 +38,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/products" element={<Products />} />
-              <Route path="/about" element={<About />} />
+              <Route path="/legal" element={<Legal />} />
               <Route path="/reviews" element={<Reviews />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
@@ -65,6 +66,7 @@ function App() {
                 }
               />
             </Routes>
+            <Footer />
             <Toaster
               theme="dark"
               position="top-right"

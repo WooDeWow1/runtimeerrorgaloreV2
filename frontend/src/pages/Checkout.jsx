@@ -23,6 +23,7 @@ export default function Checkout() {
   const [ptcPassword, setPtcPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -39,6 +40,7 @@ export default function Checkout() {
         ...(coupon ? { coupon_code: coupon.code } : {}),
         ...(storedRef() ? { ref: storedRef() } : {}),
         ...(isGuest ? { email } : {}),
+        accepted_terms: acceptedTerms,
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
       localStorage.setItem("pokeforge_checkout_url", data.checkout_url);
@@ -134,6 +136,29 @@ export default function Checkout() {
             Encrypted at rest with a server-side key. Only a fulfilment operator can decrypt it, and only for
             your order. Change your password after delivery.
           </div>
+          <label
+            data-testid="terms-accept-row"
+            className="mt-6 flex cursor-pointer items-start gap-3 border border-zinc-800 p-4 text-[11px] leading-relaxed text-zinc-400"
+          >
+            <input
+              data-testid="accept-terms-checkbox"
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span>
+              I am 18 years or older and I agree to the{" "}
+              <Link to="/legal?doc=terms" target="_blank" className="text-[#00ffcc] underline decoration-dotted">
+                Terms of Service
+              </Link>{" "}
+              and{" "}
+              <Link to="/legal?doc=privacy" target="_blank" className="text-[#00ffcc] underline decoration-dotted">
+                Privacy Policy
+              </Link>
+              .
+            </span>
+          </label>
           {error && (
             <p data-testid="checkout-error" className="mt-6 border border-[#ff3b30] bg-[#ff3b30]/10 p-3 text-xs text-[#ff3b30]">
               {error}
@@ -141,7 +166,7 @@ export default function Checkout() {
           )}
           <button
             data-testid="place-order-btn"
-            disabled={busy || invalid}
+            disabled={busy || invalid || !acceptedTerms}
             className="mt-8 w-full border border-[#00ffcc] py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
           >
             {busy ? "Opening secure payment…" : `Pay ${money(payable)}`}

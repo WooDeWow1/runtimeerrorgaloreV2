@@ -50,6 +50,7 @@ from models import (  # noqa: E402
     OrderItem,
     PasswordChangeRequest,
     CodeChangeRequest,
+    LegalUpdate,
     PayoutRequest,
     Product,
     ProductIn,
@@ -70,6 +71,7 @@ from security import (  # noqa: E402
     verify_password,
 )
 import catalog_sync  # noqa: E402
+import legal_docs  # noqa: E402
 import sellauth  # noqa: E402
 import sellauth_affiliate  # noqa: E402
 import vault  # noqa: E402
@@ -795,6 +797,9 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     email = (user["email"] if user else (payload.email or "")).lower()
     if not email:
         raise HTTPException(status_code=400, detail="An email address is required for guest checkout")
+    if not payload.accepted_terms:
+        raise HTTPException(status_code=400,
+                            detail="You must confirm you are 18+ and accept the Terms of Service")
 
     coupon_code = (payload.coupon_code or "").strip().upper() or None
     priced = await price_cart(items, coupon_code, email)
@@ -806,6 +811,8 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
         "subtotal": priced["subtotal"],
         "discount": priced["discount"],
         "coupon_code": coupon_code,
+        "accepted_terms_at": utc_now(),
+        "terms_version": TERMS_VERSION,
         "ref": (payload.ref or "").strip().upper()[:16] or None,
         "user_id": user_id,
         "email": email,
@@ -898,6 +905,8 @@ async def create_order_from_session(session: dict) -> Optional[str]:
         session_id=str(session["_id"]),
         ptc_username_enc=session["ptc_username_enc"],
         ptc_password_enc=session["ptc_password_enc"],
+        accepted_terms_at=session.get("accepted_terms_at"),
+        terms_version=session.get("terms_version", ""),
     )
     result = await db.orders.insert_one(order.to_mongo())
     order_id = str(result.inserted_id)
@@ -1322,6 +1331,79 @@ async def vault_export(payload: VaultRequest, request: Request,
     )
 
 
+LEGAL_DEFAULTS = {"privacy": legal_docs.PRIVACY_POLICY, "terms": legal_docs.TERMS_OF_SERVICE}
+TERMS_VERSION = legal_docs.TERMS_VERSION
+PTC_RETENTION_DAYS = 7
+
+
+@api.get("/legal")
+async def get_legal():
+    doc = await db.settings.find_one({"_id": "legal"}) or {}
+    return {
+        "privacy": doc.get("privacy") or LEGAL_DEFAULTS["privacy"],
+        "terms": doc.get("terms") or LEGAL_DEFAULTS["terms"],
+        "terms_version": TERMS_VERSION,
+        "privacy_version": legal_docs.PRIVACY_VERSION,
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+@api.put("/admin/legal")
+async def update_legal(payload: LegalUpdate, admin: dict = Depends(get_admin_user)):
+    updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    updates["updated_at"] = utc_now()
+    await db.settings.update_one({"_id": "legal"}, {"$set": updates}, upsert=True)
+    return await get_legal()
+
+
+async def purge_expired_credentials() -> int:
+    """Game credentials are deleted 7 days after an order completes, as promised in the privacy
+    policy. Runs on boot and whenever the admin opens the order list."""
+    cutoff = utc_now() - timedelta(days=PTC_RETENTION_DAYS)
+    result = await db.orders.update_many(
+        {"status": "completed", "updated_at": {"$lt": cutoff},
+         "ptc_username_enc": {"$exists": True, "$ne": None}},
+        {"$set": {"ptc_username_enc": None, "ptc_password_enc": None,
+                  "credentials_purged_at": utc_now()}},
+    )
+    if result.modified_count:
+        logger.info("Purged credentials for %s completed order(s)", result.modified_count)
+    return result.modified_count
+
+
+@api.get("/admin/payouts")
+async def admin_payouts(admin: dict = Depends(get_admin_user)):
+    """Pending affiliate payout requests, so they can be paid and cleared without leaving here."""
+    try:
+        rows = await sellauth_affiliate.payout_requests()
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return [
+        {
+            "id": r["id"],
+            "customer_id": (r.get("customer") or {}).get("id"),
+            "name": (r.get("customer") or {}).get("email") or "—",
+            "code": ((r.get("customer") or {}).get("affiliate_code")) or "—",
+            "amount": float(r.get("amount") or 0),
+            "details": r.get("payout_details") or "—",
+            "status": r.get("status") or "pending",
+            "requested_at": r.get("created_at"),
+        }
+        for r in rows
+    ]
+
+
+@api.post("/admin/payouts/{payout_id}/paid")
+async def admin_mark_payout_paid(payout_id: int, admin: dict = Depends(get_admin_user)):
+    try:
+        await sellauth_affiliate.mark_payout_paid(payout_id)
+    except sellauth.SellAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
 @api.get("/orders")
 async def my_orders(user: dict = Depends(get_current_user)):
     docs = await db.orders.find({"user_id": str(user["_id"])}).sort("created_at", -1).to_list(200)
@@ -1330,6 +1412,7 @@ async def my_orders(user: dict = Depends(get_current_user)):
 
 @api.get("/admin/orders")
 async def all_orders(status: Optional[str] = None, admin: dict = Depends(get_admin_user)):
+    await purge_expired_credentials()
     query = {"status": status} if status else {}
     docs = await db.orders.find(query).sort("created_at", -1).to_list(500)
     orders = []
@@ -1404,6 +1487,8 @@ async def reveal_credentials(order_id: str, admin: dict = Depends(get_admin_user
     def safe_decrypt(token: Optional[str]) -> str:
         """Legacy/seeded rows can hold unreadable ciphertext: say so instead of 500ing."""
         if not token:
+            if doc.get("credentials_purged_at"):
+                return "(deleted — 7 day retention)"
             return "(not provided)"
         try:
             return decrypt_secret(token)
@@ -2199,6 +2284,7 @@ async def seed_data():
     await migrate_hunting_category()
     await seed_variants()
     await migrate_rocket_variants()
+    await purge_expired_credentials()
 
 
 @app.on_event("shutdown")

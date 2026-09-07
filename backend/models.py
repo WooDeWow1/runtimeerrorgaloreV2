@@ -213,10 +213,16 @@ class CheckoutRequest(BaseModel):
     email: Optional[EmailStr] = None
     coupon_code: Optional[str] = None
     ref: Optional[str] = Field(default=None, max_length=16)
+    accepted_terms: bool = False
 
 
 class CodeChangeRequest(BaseModel):
     code: str = Field(min_length=3, max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class LegalUpdate(BaseModel):
+    privacy: Optional[str] = Field(default=None, max_length=120000)
+    terms: Optional[str] = Field(default=None, max_length=120000)
 
 
 class VaultRequest(BaseModel):
@@ -242,8 +248,11 @@ class Order(BaseDocument):
     status: str = "awaiting_payment"
     payment_status: str = "pending"
     session_id: Optional[str] = None
-    ptc_username_enc: str
-    ptc_password_enc: str
+    ptc_username_enc: Optional[str] = None
+    ptc_password_enc: Optional[str] = None
+    accepted_terms_at: Optional[datetime] = None
+    terms_version: str = ""
+    credentials_purged_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

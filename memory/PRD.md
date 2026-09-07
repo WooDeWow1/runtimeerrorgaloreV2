@@ -116,6 +116,26 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   checking (server correctly returns 401), refreshed image/category/Rocket-price assertions, and
   restored the backticked format in `test_credentials.md` that fixtures parse.
 
+- **Jun 2026 — compliance batch**: `/legal` hub (`pages/Legal.jsx` + `components/Markdown.jsx`,
+  720px, tabbed Privacy/Terms, `?doc=` deep link) replaces `/about` (route, page and nav link
+  removed). Documents live in `settings._id="legal"` seeded from `backend/legal_docs.py` and are
+  editable in Admin → legal. Site-wide `components/Footer.jsx` with Privacy/Terms/Refund links and
+  the exact Niantic disclaimer. Homepage hero is now `/images/video.mp4`
+  (muted/autoplay/loop/playsInline, Mainpage.jpg poster). Checkout requires an 18+/Terms checkbox;
+  `accepted_terms` is enforced server-side (400) and `accepted_terms_at` + `terms_version` are
+  stored on the session and order. `purge_expired_credentials()` nulls PTC credentials 7 days
+  after an order completes (runs on boot and whenever admin lists orders); the reveal endpoint
+  then reports "(deleted — 7 day retention)". Admin → payout requests lists pending SellAuth
+  affiliate payouts with a Mark as Paid action.
+  Verified: iteration_26.json (15/15 backend, all frontend flows, no issues).
+- **Jun 2026 — homepage video**: hero keeps `video.mp4` as the muted/autoplay/loop/playsInline
+  background; new "Refer & Earn" homepage section (`home-refer-section`) holds a second instance in
+  a manual player (`components/ExplainerVideo.jsx`) — native controls (play/pause, seek, volume,
+  mute, fullscreen), no autoplay, neon-framed with a poster and custom play overlay, plus a
+  "Get my link" CTA to /my-orders.
+  NOT BUILT: the AI chatbot safety prompt — this app has no AI assistant (support is human
+  customer↔admin chat), so there is no system prompt to harden.
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

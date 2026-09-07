@@ -209,6 +209,27 @@ async def assign_tier(customer_id: int, tier_id: int) -> dict:
     return resp.json()
 
 
+async def payout_requests(status: str = "pending") -> list[dict]:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliate-payouts",
+                                headers=_headers(), params={"status": status, "perPage": 100})
+    if resp.is_error:
+        raise _err(resp, "payout list")
+    body = resp.json()
+    return body.get("data") if isinstance(body, dict) else body
+
+
+async def mark_payout_paid(payout_id: int) -> dict:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{SELLAUTH_BASE}/shops/{_shop_id()}/affiliate-payouts/{int(payout_id)}/pay",
+            headers=_headers(),
+        )
+    if resp.is_error:
+        raise _err(resp, "payout pay")
+    return resp.json()
+
+
 def referral_link(code: str) -> str:
     base = (os.environ.get("PUBLIC_APP_URL") or "").rstrip("/")
     return f"{base}/?ref={code}"

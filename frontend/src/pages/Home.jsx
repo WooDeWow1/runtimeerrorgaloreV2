@@ -6,9 +6,11 @@ import { api } from "@/lib/api";
 import { useCategories } from "@/lib/useCategories";
 import { ProductCard } from "@/components/ProductCard";
 import { ReviewCarousel } from "@/components/ReviewCarousel";
+import { ExplainerVideo } from "@/components/ExplainerVideo";
 import { useCart } from "@/context/CartContext";
 
-const HERO = "/images/snorlax.jpg";
+const HERO_VIDEO = "/images/video.mp4";
+const HERO_POSTER = "/images/Mainpage.jpg";
 const GENGAR = "/images/Mainpage.jpg";
 const PSYDUCK = "/images/psyduck.jpg";
 
@@ -31,7 +33,17 @@ export default function Home() {
     <div data-testid="home-page">
       {/* HERO */}
       <section className="scanlines relative overflow-hidden border-b border-[#1f1f1f]">
-        <img src={HERO} alt="Snorlax" className="absolute inset-0 h-full w-full object-cover opacity-40" />
+        <video
+          data-testid="hero-video"
+          src={HERO_VIDEO}
+          poster={HERO_POSTER}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          className="absolute inset-0 h-full w-full object-cover opacity-40"
+        />
         <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-[#050505]/85 to-transparent" />
         <div className="relative mx-auto grid max-w-[1400px] gap-10 px-5 py-24 lg:grid-cols-12 lg:px-10 lg:py-36">
           <motion.div
@@ -139,6 +151,41 @@ export default function Home() {
         </div>
       </section>
 
+      {/* REFER & EARN — explainer video + promoter CTA */}
+      <section
+        id="refer"
+        data-testid="home-refer-section"
+        className="border-y border-[#1f1f1f] bg-[#080808] py-20 lg:py-28"
+      >
+        <div className="mx-auto grid max-w-[1400px] items-center gap-12 px-5 lg:grid-cols-12 lg:px-10">
+          <div className="lg:col-span-5">
+            <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#00ffcc]">
+              // refer &amp; earn
+            </p>
+            <h2 className="mt-5 font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
+              Get paid to share PokeCoins
+            </h2>
+            <p className="mt-6 max-w-lg text-sm leading-relaxed text-zinc-400">
+              Share your link, earn commission on everything your referrals buy for 30 days after
+              they click. One tap to become a promoter, single-use codes, and payouts from $10.
+              Watch how it works, then grab your link.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-4">
+              <Link
+                to="/my-orders"
+                data-testid="refer-cta-btn"
+                className="border border-[#00ffcc] px-7 py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
+              >
+                Get my link
+              </Link>
+            </div>
+          </div>
+          <div className="lg:col-span-7">
+            <ExplainerVideo src={HERO_VIDEO} poster={HERO_POSTER} />
+          </div>
+        </div>
+      </section>
+
       {/* SHUNDO — COMING SOON */}
       <section className="relative overflow-hidden border-y border-[#1f1f1f] bg-[#070707] py-20 lg:py-28">
         <div className="pointer-events-none absolute inset-0 flex items-center opacity-[0.06]">
@@ -176,7 +223,6 @@ export default function Home() {
 
       <footer className="mx-auto max-w-[1400px] px-5 py-12 text-[10px] uppercase tracking-[0.25em] text-zinc-600 lg:px-10">
         © 2026 PokeCoins.cc · unofficial fan marketplace · not affiliated with Niantic or The Pokémon Company
-      </footer>
-    </div>
+      </footer>    </div>
   );
 }

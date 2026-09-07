@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 26 (Legal / PokeCoins compliance batch) tested end-to-end. Backend: 15/15 pytest cases pass in /app/backend/tests/test_legal_compliance_v26.py covering GET /api/legal (public), PUT /api/admin/legal (auth-gated + empty->400 + partial updates don't clobber the other doc), checkout accepted_terms gate (missing/false -> 400 with 18+/Terms message, true passes the gate), 7-day PTC credential purge matrix (completed+old purged, completed+new & non-completed left alone, /credentials returns friendly '(deleted — 7 day retention)' message), and payouts (401/403 for guest/customer, 200 [] for admin, 4xx not 500 for bogus id). Frontend: homepage hero-video has muted/loop/autoplay/playsInline true and src /images/video.mp4 with Mainpage.jpg poster (playback not asserted per instructions); /about route removed (no route match, no About nav link, Legal link present in nav); Footer present on /, /products, /legal, /reviews, /checkout, /my-orders with privacy/terms/refund links + exact Niantic disclaimer sentence; /legal has both tabs, shows formatted markdown (no raw ##), ?doc=terms deep-link switches to Terms body; Checkout page has accept-terms-checkbox with disabled place-order-btn that becomes enabled after tick, Terms/Privacy links in label point to /legal; Admin has admin-tab-legal (privacy/terms sub-tabs + editor + save-legal-btn) and admin-tab-payouts renders no-payouts empty state without errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_legal_compliance_v26.py",
+    "/app/test_reports/pytest/pytest_iter26.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "purge_expired_credentials only sets credentials_purged_at when ptc_username_enc exists ({$exists:true, $ne:null}); orders that were already null (e.g. legacy) won't be flagged as purged. Acceptable, but worth noting for the /credentials UI which relies on that flag.",
+    "checkout gate correctly rejects before any SellAuth call (short-circuit before session insert) — no race on session cleanup.",
+    "get_legal falls back to seeded defaults when the settings doc is missing — good, keeps /legal never-empty."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_legal_compliance_v26.py",
+    "/app/backend/tests/conftest.py"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% of asserted UI attributes/testids present"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "TestCredentialPurge seeds three orders in Mongo (TEST_purge_*) with controlled updated_at values and cleans them up in the finally block. No SellAuth/live-checkout side effects were exercised.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 26 focused on legal-compliance batch. Backend tests live at /app/backend/tests/test_legal_compliance_v26.py — reuse them as regression. TestCheckoutGate.test_accepted_terms_creates_session_with_metadata attempts a real SellAuth checkout only when the gate passes; if SellAuth 400s (e.g. non-coin cart), the test still asserts the 400 detail is NOT the terms/18+ message. Admin affiliates tab label is displayed as 'Promoters' but data-testid is admin-tab-affiliates; task's 'promoters' expectation is satisfied.",
+  "rca of the issue": "n/a — no failures."
+}
