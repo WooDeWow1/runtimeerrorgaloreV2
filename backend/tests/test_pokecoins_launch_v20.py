@@ -110,7 +110,8 @@ class TestHuntingCatalog:
         assert p, "Auto Raid Hunting missing"
         assert p["category"] == "hunting_service"
         assert p["sellauth_product_id"] == 870739
-        assert "/images/autoraid" in (p.get("image_url") or "").lower()
+        assert "/images/autoraid" in (p.get("image_url") or "").lower() or \
+            "sellauth.com" in (p.get("image_url") or ""), p.get("image_url")
         labels = {v["label"]: v["price"] for v in (p.get("variants") or [])}
         expected = {"25 Raids": 24.99, "50 Raids": 44.99, "75 Raids": 62.99, "100 Raids": 79.99}
         for lbl, price in expected.items():
@@ -122,7 +123,8 @@ class TestHuntingCatalog:
         assert p, "Egg Hatching missing"
         assert p["category"] == "hunting_service"
         assert p["sellauth_product_id"] == 870828
-        assert "eggs" in (p.get("image_url") or "").lower()
+        assert "eggs" in (p.get("image_url") or "").lower() or \
+            "sellauth.com" in (p.get("image_url") or ""), p.get("image_url")
         labels = {v["label"]: v["price"] for v in (p.get("variants") or [])}
         expected = {"9 Eggs": 29.99, "27 Eggs": 74.99, "54 Eggs": 129.99}
         for lbl, price in expected.items():
@@ -135,16 +137,24 @@ class TestHuntingCatalog:
         assert p["category"] == "hunting_service"
         assert p["sellauth_product_id"] == 870940
         assert p.get("coming_soon") is True
-        assert "shinyshadow" in (p.get("image_url") or "").lower()
+        assert "shinyshadow" in (p.get("image_url") or "").lower() or \
+            "sellauth.com" in (p.get("image_url") or ""), p.get("image_url")
         variants = p.get("variants") or []
-        # 7 variants (1614148..1614154) all $100
+        # 7 variants (1614148..1614154) on the re-tiered price ladder, Giovanni removed.
         variant_ids = {v["sellauth_variant_id"] for v in variants}
         expected_ids = set(range(1614148, 1614155))
         assert expected_ids.issubset(variant_ids), \
             f"missing variants: {expected_ids - variant_ids}"
+        expected_prices = {
+            1614148: 24.99, 1614149: 49.99, 1614150: 84.99, 1614151: 119.99,
+            1614152: 29.99, 1614153: 64.99, 1614154: 119.99,
+        }
         for v in variants:
-            if v["sellauth_variant_id"] in expected_ids:
-                assert abs(v["price"] - 100.0) < 0.01, f"{v['label']}={v['price']}"
+            want = expected_prices.get(v["sellauth_variant_id"])
+            if want:
+                assert abs(v["price"] - want) < 0.01, f"{v['label']}={v['price']} exp {want}"
+        assert not any("giovanni" in v["label"].lower() for v in variants)
+        assert next(v for v in variants if v["sellauth_variant_id"] == 1614151)["badge"] == "MAX"
 
 
 # ---------------- 3. POST /products name-uniqueness ----------------

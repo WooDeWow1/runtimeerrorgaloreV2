@@ -133,7 +133,7 @@ class TestVisibilityToggles:
         assert not (found["active"])
 
     def test_featured_coming_soon_persists(self, all_products, restorer):
-        target = next(p for p in all_products if p["category"] == "shundo_service")
+        target = next(p for p in all_products if "Shundo" in p["name"])
         updated = restorer(target, coming_soon=True, is_featured=True, active=True)
         assert updated["coming_soon"] and updated["is_featured"]
         pub = requests.get(f"{API}/products").json()
@@ -141,7 +141,7 @@ class TestVisibilityToggles:
         assert found["is_featured"] and found["coming_soon"]
 
     def test_toggle_featured_endpoint(self, all_products, admin_token):
-        target = next(p for p in all_products if p["category"] == "shundo_service")
+        target = next(p for p in all_products if "Shundo" in p["name"])
         original = bool(target.get("is_featured"))
         try:
             r = requests.patch(f"{API}/products/{target['id']}/featured",

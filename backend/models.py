@@ -219,6 +219,10 @@ class CodeChangeRequest(BaseModel):
     code: str = Field(min_length=3, max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class VaultRequest(BaseModel):
+    phrase: str = Field(min_length=1, max_length=120)
+
+
 class PayoutRequest(BaseModel):
     amount: float = Field(gt=0)
     method: Literal["cashapp", "btc", "sol", "ltc", "usdc"]

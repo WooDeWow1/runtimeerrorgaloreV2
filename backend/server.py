@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -55,6 +56,7 @@ from models import (  # noqa: E402
     ProductUpdate,
     RegisterRequest,
     StatusUpdate,
+    VaultRequest,
     WaitlistIn,
     utc_now,
 )
@@ -70,6 +72,7 @@ from security import (  # noqa: E402
 import catalog_sync  # noqa: E402
 import sellauth  # noqa: E402
 import sellauth_affiliate  # noqa: E402
+import vault  # noqa: E402
 import turnstile  # noqa: E402
 from emailer import (  # noqa: E402
     admin_order_url,
@@ -1252,6 +1255,71 @@ async def change_affiliate_code(payload: CodeChangeRequest, user: dict = Depends
     except sellauth.SellAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return affiliate_view(detail or {}, tier, shop, user) | {"program_enabled": True}
+
+
+VAULT_COLLECTIONS_SKIP = {"visits"}
+
+
+def vault_guard(request: Request, phrase: str) -> None:
+    """Second gate on top of the admin session: the phrase never leaves the backend env.
+    The throttle only ever blocks wrong guesses — knowing the phrase always gets you in, and
+    clears the counter, so a fat-fingered owner is never locked out of their own backup."""
+    ip = client_ip(request)
+    if vault.phrase_ok(phrase):
+        vault.clear_failures(ip)
+        return
+    if vault.throttled(ip):
+        raise HTTPException(status_code=429,
+                            detail="Too many attempts. Try again in 15 minutes.")
+    vault.record_failure(ip)
+    logger.warning("Vault phrase rejected from %s", ip)
+    raise HTTPException(status_code=403, detail="That phrase is not correct")
+
+
+@api.post("/admin/vault/unlock")
+async def vault_unlock(payload: VaultRequest, request: Request,
+                       admin: dict = Depends(get_admin_user)):
+    vault_guard(request, payload.phrase)
+    counts = {}
+    for name in await db.list_collection_names():
+        counts[name] = await db[name].count_documents({})
+    return {"ok": True, "collections": counts}
+
+
+@api.post("/admin/vault/code-map")
+async def vault_code_map(payload: VaultRequest, request: Request,
+                         admin: dict = Depends(get_admin_user)):
+    vault_guard(request, payload.phrase)
+    stamp = utc_now().strftime("%Y%m%d")
+    return Response(
+        content=vault.code_map(),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="pokecoins-code-map-{stamp}.md"'},
+    )
+
+
+@api.post("/admin/vault/export")
+async def vault_export(payload: VaultRequest, request: Request,
+                       admin: dict = Depends(get_admin_user)):
+    """Every collection in one JSON file, so the whole business can be walked away with."""
+    vault_guard(request, payload.phrase)
+    dump: dict[str, list] = {}
+    for name in sorted(await db.list_collection_names()):
+        if name in VAULT_COLLECTIONS_SKIP:
+            continue
+        dump[name] = await db[name].find().to_list(100000)
+
+    body = json.dumps(
+        {"exported_at": utc_now().isoformat(), "database": os.environ["DB_NAME"],
+         "collections": dump},
+        default=str, indent=1,
+    )
+    stamp = utc_now().strftime("%Y%m%d-%H%M")
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="pokecoins-backup-{stamp}.json"'},
+    )
 
 
 @api.get("/orders")

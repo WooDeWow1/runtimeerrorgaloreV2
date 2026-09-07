@@ -104,6 +104,18 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   "Refresh images" button re-pulls on demand.
   Verified: iteration_24.json (12/12 new, 0 broken images on / and /products, regression green).
 
+- **Jun 2026 — Backup Vault**: hidden owner escape hatch at `/admin/vault-access` (no nav or tab
+  entry, `ProtectedRoute adminOnly`). Second gate is `VAULT_PHRASE` in backend env only, compared
+  with `secrets.compare_digest`; the phrase is never in the bundle, never echoed, never stored
+  client-side, and the page re-locks on reload. Wrong guesses are throttled 5 per 15 min per IP
+  while a correct phrase always passes and clears the counter. Tools: `POST
+  /api/admin/vault/code-map` (markdown outline of ~60 backend/frontend files via `vault.code_map`)
+  and `POST /api/admin/vault/export` (every collection except `visits` as one JSON download).
+  Verified: iteration_25.json (17/17 vault tests, no security findings).
+- Stale test cleanup (Jun 2026): fixed the `post_webhook` helper bug that masked signature
+  checking (server correctly returns 401), refreshed image/category/Rocket-price assertions, and
+  restored the backticked format in `test_credentials.md` that fixtures parse.
+
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,
 Reply-To = support@pokecoins.cc. Sending *from* support@pokecoins.cc is not possible without a

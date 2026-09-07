@@ -1,0 +1,40 @@
+{
+  "summary": "Backup Vault (iteration 25): 17/17 vault backend tests pass; frontend Vault page validated end-to-end. Security gates work: guest→401, customer→403 (even with correct phrase), admin+wrong→403 generic, admin+correct→200. Rate limiter throttles at 5 wrong IP attempts (returns 429, unrelated endpoints still work); a successful unlock clears the counter. Phrase is not in the frontend bundle, not echoed in responses/headers, and not stored in localStorage/sessionStorage/cookies. /admin/vault-access is hidden from navbar + Admin tab strip and blocked for guests+customers. Code map & export downloads succeed with server-provided filenames (pokecoins-code-map-20260907.md, pokecoins-backup-20260907-0115.json). Reload re-locks the vault. Admin+customer smoke: /admin loads with Orders/Refer & Earn tabs, /dashboard shows Refer & Earn — routing change did not break anything. Regression: 16 pre-existing failures in other suites (affiliate/coming_soon/hybrid_coupons/pokecoins_launch/reviews/refactor/sellauth) that are unrelated to this iteration (same failures noted in prior iterations 18–24).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vault_v25.py",
+    "/app/test_reports/pytest/vault_v25.xml"
+  ],
+  "action_items": [
+    "None for the Backup Vault feature — implementation matches spec.",
+    "(Pre-existing, not caused by iteration 25) 16 regression failures in other suites should be triaged: test_auth_playbook_v7 collection error, test_variants_v8 collection error, and failing test_affiliate_v21 / test_coming_soon_v3 / test_hybrid_coupons_v7 / test_pokecoins_launch_v20 / test_review_rewards_v10 / test_refactor_regression_v9 / test_sellauth_launch_v6 cases — same as prior iterations."
+  ],
+  "critical_code_review_comments": [
+    "vault.py rate limiter is in-memory (module dict). Acceptable for MVP but resets on backend restart and doesn't work across multiple pods; consider MongoDB-backed counter if the app is ever scaled horizontally.",
+    "vault_guard() runs AFTER get_admin_user (via Depends). This is the correct security order and means non-admin traffic does NOT consume the throttle — verified in tests.",
+    "vault_export uses default=str for ObjectId/datetime serialization. Works, but a normal customer or attacker can never reach the endpoint so no info-leak risk.",
+    "Vault.jsx keeps the phrase in useState only; nothing hits localStorage/sessionStorage/cookies — verified. Reloading the page re-locks correctly.",
+    "Vault route is truly hidden — no <Link>/<NavLink> to /admin/vault-access anywhere in the frontend bundle (confirmed by scanning /app/frontend/src and by DOM inspection of Navbar + Admin tab strip)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_vault_v25.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% on vault suite (17/17)",
+    "frontend": "100% on vault flow"
+  },
+  "test_credentials": "Admin officialwifi@icloud.com / admin; VAULT_PHRASE read from backend/.env (not committed).",
+  "seed_data_creation": "Two throwaway TEST_ customer accounts registered via /api/auth/register for gating tests; no admin data mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Rate limit test in test_vault_v25.py::TestVaultRateLimitZ intentionally locks the tester's IP for 15 minutes on backend at end of run. To re-run cleanly, `sudo supervisorctl restart backend` first (clears the in-memory _attempts dict in vault.py). Running under xdist can also cause the auth-gating wrong-phrase tests to consume 2 failure slots, so rate-limit test may fail if not run in isolation after a restart — this is a test-ordering artifact, not a product bug. Feature itself is solid; no follow-up dev work identified.",
+  "rca of the issue": "N/A — no defects found in the Backup Vault feature."
+}

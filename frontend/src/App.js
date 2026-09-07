@@ -20,6 +20,7 @@ import PaymentCancel from "@/pages/PaymentCancel";
 import MyOrders from "@/pages/MyOrders";
 import OrderDetail from "@/pages/OrderDetail";
 import Admin from "@/pages/Admin";
+import Vault from "@/pages/Vault";
 import Reviews from "@/pages/Reviews";
 
 function App() {
@@ -52,6 +53,14 @@ function App() {
                 element={
                   <ProtectedRoute adminOnly>
                     <Admin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/vault-access"
+                element={
+                  <ProtectedRoute adminOnly>
+                    <Vault />
                   </ProtectedRoute>
                 }
               />

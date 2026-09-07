@@ -55,10 +55,10 @@ def sign(raw: bytes) -> str:
 def post_webhook(body: dict, signature=True, secret_query=False):
     raw = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
-    if signature:
-        headers["signature"] = sign(raw)
-    elif isinstance(signature, str):
+    if isinstance(signature, str):
         headers["signature"] = signature
+    elif signature:
+        headers["signature"] = sign(raw)
     url = f"{LOCAL_API}/webhooks/sellauth"
     if secret_query:
         url = f"{url}?secret={WEBHOOK_SECRET}"

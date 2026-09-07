@@ -84,7 +84,7 @@ def by_name(products, name):
 
 # ---------------- categories ----------------
 class TestCategories:
-    EXPECTED = ["pokecoin_bundle", "event_pass", "pokelid", "medals", "stardust", "shundo_service"]
+    EXPECTED = ["pokecoin_bundle", "hunting_service", "event_pass", "pokelid", "medals", "stardust"]
 
     def test_public_list_order(self, anon):
         r = anon.get(f"{API}/categories")
@@ -92,9 +92,8 @@ class TestCategories:
         data = r.json()
         assert [c["key"] for c in data] == self.EXPECTED
         assert all("_id" not in c and "id" in c for c in data)
-        shundo = next(c for c in data if c["key"] == "shundo_service")
-        assert shundo["coming_soon"]
-        assert shundo["label"] == "Shundo Hunting (Waitlist)"
+        hunting = next(c for c in data if c["key"] == "hunting_service")
+        assert hunting["label"] == "Hunting Service"
 
     def test_admin_guard(self, anon):
         assert anon.post(f"{API}/admin/categories", json={"label": "TEST_nope"}).status_code == 401
@@ -155,14 +154,15 @@ class TestProductsSellAuth:
     def test_pokelid_products(self, products, anon):
         japan = by_name(products, "Japan PokéLid Stamp Rally Collection")
         lego = by_name(products, "LEGO PokéLid Stamp Rally")
-        for p, sid, img in ((japan, 857694, "/images/japanlid.jpg"), (lego, 857690, "/images/legolid.jpg")):
+        for p, sid in ((japan, 857694), (lego, 857690)):
             assert p["category"] == "pokelid"
             assert p["sellauth_product_id"] == sid
             assert isinstance(p["sellauth_variant_id"], int)
-            assert p["image_url"] == img
+            # Images are synced from SellAuth now, local files are only a manual override.
+            assert p["image_url"].startswith("http"), p["image_url"]
             assert p["description"] == POKELID_DESCRIPTION
             assert p["price"] > 0
-            assert anon.get(f"{BASE_URL}{img}").status_code == 200
+            assert anon.get(p["image_url"]).status_code == 200
 
     def test_product_crud_with_sellauth_autofill(self, admin):
         payload = {
@@ -183,7 +183,8 @@ class TestProductsSellAuth:
             # persisted
             listed = admin.get(f"{API}/products", params={"include_inactive": "true"}).json()
             saved = next(p for p in listed if p["id"] == pid)
-            assert saved["image_url"] == "/images/japanlid.jpg"
+            # A SellAuth id wins over the submitted filename: the shop image is authoritative.
+            assert saved["image_url"].startswith("http"), saved["image_url"]
             assert saved["msrp"] == 9.99
             # update: partial edit keeps other fields
             r = admin.put(f"{API}/products/{pid}", json={"name": "TEST_QA Product 2", "badge": "QA2"})
