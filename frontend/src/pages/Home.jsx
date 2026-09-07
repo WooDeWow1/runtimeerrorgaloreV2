@@ -11,7 +11,6 @@ import { useCart } from "@/context/CartContext";
 
 const HERO_VIDEO = "/images/video.mp4";
 const HERO_POSTER = "/images/Mainpage.jpg";
-const GENGAR = "/images/Mainpage.jpg";
 const PSYDUCK = "/images/psyduck.jpg";
 
 export default function Home() {
@@ -83,15 +82,15 @@ export default function Home() {
             </div>
           </motion.div>
 
-          <div className="hidden lg:col-span-5 lg:flex lg:items-end lg:justify-end">
-            <motion.img
+          <div className="mt-12 lg:col-span-5 lg:mt-0 lg:flex lg:items-end lg:justify-end">
+            <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.9, delay: 0.2 }}
-              src={GENGAR}
-              alt="PokeCoins hero artwork"
-              className="w-full max-w-[520px] border border-[#00ffcc]/30 object-cover"
-            />
+              className="w-full lg:max-w-[520px]"
+            >
+              <ExplainerVideo src={HERO_VIDEO} poster={HERO_POSTER} />
+            </motion.div>
           </div>
         </div>
       </section>
@@ -148,41 +147,6 @@ export default function Home() {
           >
             View full catalog
           </Link>
-        </div>
-      </section>
-
-      {/* REFER & EARN — explainer video + promoter CTA */}
-      <section
-        id="refer"
-        data-testid="home-refer-section"
-        className="border-y border-[#1f1f1f] bg-[#080808] py-20 lg:py-28"
-      >
-        <div className="mx-auto grid max-w-[1400px] items-center gap-12 px-5 lg:grid-cols-12 lg:px-10">
-          <div className="lg:col-span-5">
-            <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#00ffcc]">
-              // refer &amp; earn
-            </p>
-            <h2 className="mt-5 font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
-              Get paid to share PokeCoins
-            </h2>
-            <p className="mt-6 max-w-lg text-sm leading-relaxed text-zinc-400">
-              Share your link, earn commission on everything your referrals buy for 30 days after
-              they click. One tap to become a promoter, single-use codes, and payouts from $10.
-              Watch how it works, then grab your link.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-4">
-              <Link
-                to="/my-orders"
-                data-testid="refer-cta-btn"
-                className="border border-[#00ffcc] px-7 py-4 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
-              >
-                Get my link
-              </Link>
-            </div>
-          </div>
-          <div className="lg:col-span-7">
-            <ExplainerVideo src={HERO_VIDEO} poster={HERO_POSTER} />
-          </div>
         </div>
       </section>
 
