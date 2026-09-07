@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 24 — Automatic SellAuth product image sync end-to-end. Backend: added /app/backend/tests/test_image_sync_v24.py (12 cases, 12/12 pass) covering (a) sellauth._image_url helper ordering by pivot.order + empty/missing url paths, (b) POST /api/admin/sync/images auth gate: 401 unauth / 403 customer / 200 admin with `{ok:true, updated:int}` and idempotency (second run reports updated:0), (c) GET /api/products shows 17 SellAuth-linked products with https://api.sellauth.com/... image_url and BOTH Shundo products still on /images/snorlax.jpg + /images/gengar.jpg (unchanged), (d) POST /api/products with a sellauth_product_id and no image_url auto-fills the remote image and persists it via GET, (e) CRITICAL REGRESSION: PUT /api/products/{id} with `{badge: ...}` (image_url omitted) leaves the synced https:// image_url intact (verified by re-GET), (f) manual override via `image_url: '/images/x.jpg'` sets local file and a subsequent /api/admin/sync/images restores the remote URL (updated>=1), (g) changing sellauth_product_id refreshes image_url, price and sellauth_variant_id together, (h) GET /api/admin/sync/catalog dry-run returns 200 with creates/updates arrays (image_url is in syncable_fields per catalog_sync.py L8). Frontend Playwright at 1920x1080: storefront `/` (9 imgs, 0 broken) and `/products` (19 imgs, 0 broken — 17 remote sellauth.com + 2 Shundo local snorlax/gengar). Admin console login → Products tab: sync-images-btn present, click shows toast 'Images already current' (idempotent, screenshot captured). Edit first product: label reads exactly 'Image filename (optional)', input value is empty (no local override), product-image-preview.src = https://api.sellauth.com/storage/images/1127185.webp (SellAuth remote), Save without touching the field → API GET afterwards confirms image_url unchanged (regression fix works). Regression run: test_sellauth_launch_v6 + test_product_update_v4 = 29 passed, 6 skipped, 1 unrelated stale test failure (see below).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_image_sync_v24.py",
+    "/app/test_reports/pytest/image_sync_v24.xml"
+  ],
+  "action_items": [
+    "OPTIONAL / not caused by this iteration: /app/backend/tests/test_sellauth_launch_v6.py::TestCatalogMapping::test_only_the_two_shundo_items_are_coming_soon is stale — asserts len(coming_soon)==2 but the current catalog also has 'Team GO Rocket — Shiny Shadow Hunting' flagged coming_soon (3 total). Update the assertion or remove the strict count when convenient; no functional bug.",
+    "OPTIONAL: /app/backend/tests/test_variants_v8.py has a module-level import/parse bug (AttributeError NoneType.group at collection time). Pre-existing, unrelated to image sync."
+  ],
+  "critical_code_review_comments": [
+    "GOOD: sellauth._image_url() sorts by (pivot.order,0) tuple with safe defaults — handles missing pivot/order and images=None cleanly. Unit-tested.",
+    "GOOD: sellauth_fields() only adds `image_url` to the update dict when SellAuth actually returned one, so a transient empty-images response from SellAuth cannot blank an existing image_url — the field is simply not touched. Combined with the frontend omitting image_url when blank+sellauth_id, this closes the regression window cleanly.",
+    "GOOD: sync_sellauth_images() only writes when image_url differs, so the idempotent second run genuinely reports updated:0 (verified live).",
+    "GOOD: POST /api/admin/sync/images is behind Depends(get_admin_user) — 401 for anonymous, 403 for customer verified.",
+    "GOOD: ProductEditor.jsx L102-109 payload build correctly omits image_url ONLY when image_file is blank AND a sellauth_product_id is present. If the id is cleared, image_url:'' IS sent to allow clearing. Nice branching.",
+    "GOOD: image_file init on L34-36 skips http:// URLs so a SellAuth-synced product opens with an empty filename field (not a garbled URL fragment), and localImage/remoteImage fallback on L134-138 shows the correct preview.",
+    "GOOD: Shundo pair (no sellauth_product_id) is left untouched by the sync loop — verified in production: /images/snorlax.jpg and /images/gengar.jpg both still render.",
+    "MINOR: server.py is now ~1900 lines. Extraction of the sync/image + catalog block into /app/backend/products_admin.py would help discoverability (carried from iter 23).",
+    "MINOR: The 'Refresh images' toast omits when the SellAuth API is unreachable — sync_sellauth_images() swallows per-product errors with logger.warning but returns the count of only-updated docs, so a partial failure looks like a success. Consider surfacing a `skipped: n` counter alongside `updated` in the response payload for observability. Not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_image_sync_v24.py (new, 12 cases)"
+  ],
+  "success_rate": {"backend": "100% (12/12 new)", "frontend": "100% — sync btn, toast, optional label, remote preview, save-without-wipe all verified"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md). Test customer for 403 check: TEST_imgsync_<hex>@mailinator.com (auto-created).",
+  "seed_data_creation": "Test products TEST_autoimg_<hex> and TEST_swap_<hex> were briefly created via POST /api/products to verify auto-image and id-swap behaviour, and deleted in the fixture teardown. No orders, no SellAuth mutations, no catalog push to production.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd /app && REACT_APP_BACKEND_URL=https://digital-gaming-store-7.preview.emergentagent.com python -m pytest backend/tests/test_image_sync_v24.py -v -o 'addopts='. Notes: pytest.ini adds -n --dist loadscope which caches sessions across workers — always append -o 'addopts=' when running one file. The 17 SellAuth image URLs on live are already backfilled; expect updated:0 from /api/admin/sync/images unless a product's remote image changes upstream. Do NOT POST /admin/sync/catalog (that would push to prod).",
+  "rca_of_the_issue": "N/A — no bugs found in this iteration."
+}

@@ -31,7 +31,9 @@ const toForm = (p) =>
         price: p.price ?? "",
         msrp: p.msrp ?? "",
         badge: p.badge || "",
-        image_file: (p.image_url || "").replace("/images/", ""),
+        image_file: (p.image_url || "").startsWith("http")
+          ? ""
+          : (p.image_url || "").replace("/images/", ""),
         sellauth_product_id: p.sellauth_product_id ?? "",
         active: p.active !== false,
         coming_soon: !!p.coming_soon,
@@ -97,7 +99,14 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
       price: Number(form.price),
       msrp: form.msrp === "" ? null : Number(form.msrp),
       badge: form.badge,
-      image_url: form.image_file ? `/images/${form.image_file.replace(/^\/?images\//, "")}` : "",
+      // Blank means "use the SellAuth image": sending "" would wipe the synced URL.
+      ...(form.image_file || !form.sellauth_product_id
+        ? {
+            image_url: form.image_file
+              ? `/images/${form.image_file.replace(/^\/?images\//, "")}`
+              : "",
+          }
+        : {}),
       sellauth_product_id: form.sellauth_product_id === "" ? null : Number(form.sellauth_product_id),
       active: form.active,
       coming_soon: form.coming_soon,
@@ -122,7 +131,11 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
     }
   };
 
-  const preview = form.image_file ? `/images/${form.image_file.replace(/^\/?images\//, "")}` : "";
+  const localImage = form.image_file
+    ? `/images/${form.image_file.replace(/^\/?images\//, "")}`
+    : "";
+  const remoteImage = (product?.image_url || "").startsWith("http") ? product.image_url : "";
+  const preview = localImage || remoteImage;
 
   return (
     <form
@@ -217,15 +230,19 @@ export const ProductEditor = ({ product, categories, onSaved, onCancel }) => {
           </div>
         </div>
         <div>
-          <label className={label}>Image filename</label>
+          <label className={label}>Image filename (optional)</label>
           <input
             data-testid="product-image-input"
             className={input}
             value={form.image_file}
             onChange={set("image_file")}
-            placeholder="stardust.jpg"
+            placeholder={remoteImage ? "Using the SellAuth image" : "stardust.jpg"}
           />
-          <p className="mt-1.5 text-[10px] text-zinc-600">Looked up in frontend/public/images.</p>
+          <p className="mt-1.5 text-[10px] text-zinc-600">
+            {remoteImage
+              ? "Pulled from SellAuth automatically. Only fill this in to override it."
+              : "Leave blank when a SellAuth product ID is set — the shop image is used."}
+          </p>
         </div>
         <div>
           <label className={label}>Badge</label>

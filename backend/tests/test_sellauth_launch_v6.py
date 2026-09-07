@@ -105,11 +105,15 @@ class TestCatalogMapping:
                    and not (p.get("sellauth_product_id") and p.get("sellauth_variant_id"))]
         assert missing == [], f"products missing SellAuth ids: {missing}"
 
-    def test_only_the_two_shundo_items_are_coming_soon(self, products):
-        cs = [p for p in products if p.get("coming_soon")]
-        assert len(cs) == 2, [p["name"] for p in cs]
-        assert all(p["category"] == "shundo_service" for p in cs)
-        assert all(p.get("sellauth_product_id") is None for p in cs)
+    def test_shundo_items_are_coming_soon_and_local(self, products):
+        """Shundo is not on SellAuth yet, so those two keep local images. Other lines (Rocket)
+        may also be Coming Soon, which is a merchandising choice, not a catalog error."""
+        shundo = [p for p in products if p["category"] == "hunting_service"
+                  and p["name"].startswith("Shundo Hunt")]
+        assert len(shundo) == 2, [p["name"] for p in shundo]
+        assert all(p.get("coming_soon") for p in shundo)
+        assert all(p.get("sellauth_product_id") is None for p in shundo)
+        assert all(p["image_url"].startswith("/images/") for p in shundo)
 
     def test_no_mongo_object_id_leak(self, products):
         for p in products:

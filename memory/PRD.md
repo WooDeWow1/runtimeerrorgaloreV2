@@ -94,6 +94,15 @@ chat, admin dashboard, premium dark "hacker-forum" aesthetic.
   `code_editable` and `code_change_used`; the panel shows "Edit my code" until used, then
   "personalised" (`EditCodeDialog.jsx`, refetches `/affiliate/me` after saving).
   Verified: iteration_23.json (11/11 new + 28/28 regression), stale-flag bug from that run fixed.
+- **Jun 2026 — automatic product images**: `sellauth._image_url()` reads the first gallery image
+  (by pivot order) and `fetch_product` returns it, so `sellauth_fields()` saves it to `image_url`
+  on create and whenever the SellAuth id changes. `POST /api/admin/sync/images`
+  (`sync_sellauth_images`) backfills every product with a SellAuth id — run once, 17 updated. The
+  two Shundo products have no SellAuth id and keep their local files. Admin "Image filename" is
+  now optional: the field is omitted from the payload when blank and a SellAuth id exists, so a
+  routine edit can't wipe the synced URL; the remote image shows as the preview, and a
+  "Refresh images" button re-pulls on demand.
+  Verified: iteration_24.json (12/12 new, 0 broken images on / and /products, regression green).
 
 ## Email
 Sends via Emergent managed email. From address is Emergent-controlled; From name = PokeCoins,

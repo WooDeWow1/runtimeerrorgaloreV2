@@ -401,7 +401,8 @@ async def lookup_sellauth_product(sellauth_product_id: int, admin: dict = Depend
 
 
 async def sellauth_fields(sellauth_product_id: Optional[int]) -> dict:
-    """Pull the variant id and live price for a SellAuth product, ignoring lookup failures."""
+    """Pull the variant id, live price and gallery image for a SellAuth product, ignoring
+    lookup failures. The image comes from SellAuth so nobody has to manage a local folder."""
     if not sellauth_product_id:
         return {}
     try:
@@ -409,7 +410,32 @@ async def sellauth_fields(sellauth_product_id: Optional[int]) -> dict:
     except (sellauth.SellAuthError, httpx.HTTPError) as exc:
         logger.warning("SellAuth lookup failed for %s: %s", sellauth_product_id, exc)
         return {}
-    return {"sellauth_variant_id": remote["sellauth_variant_id"], "price": remote["price"]}
+    fields = {"sellauth_variant_id": remote["sellauth_variant_id"], "price": remote["price"]}
+    if remote.get("image_url"):
+        fields["image_url"] = remote["image_url"]
+    return fields
+
+
+async def sync_sellauth_images() -> int:
+    """One pass over every product that has a SellAuth id, so the storefront art always matches
+    the shop. Products without an id (the Shundo pair) keep their local image."""
+    updated = 0
+    async for doc in db.products.find({"sellauth_product_id": {"$ne": None}}):
+        try:
+            remote = await sellauth.fetch_product(doc["sellauth_product_id"])
+        except (sellauth.SellAuthError, httpx.HTTPError) as exc:
+            logger.warning("Image sync skipped %s: %s", doc.get("name"), exc)
+            continue
+        image_url = remote.get("image_url")
+        if image_url and image_url != doc.get("image_url"):
+            await db.products.update_one({"_id": doc["_id"]}, {"$set": {"image_url": image_url}})
+            updated += 1
+    return updated
+
+
+@api.post("/admin/sync/images")
+async def sync_images(admin: dict = Depends(get_admin_user)):
+    return {"ok": True, "updated": await sync_sellauth_images()}
 
 
 # ---------------- Products ----------------

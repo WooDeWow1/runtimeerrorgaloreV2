@@ -204,8 +204,19 @@ export default function Admin() {
     }
   };
 
-  const productName = (id) => products.find((p) => p.id === id)?.name || "General";
+  const syncImages = async () => {
+    try {
+      const { data } = await api.post("/admin/sync/images");
+      toast.success(
+        data.updated ? `${data.updated} image(s) refreshed from SellAuth` : "Images already current"
+      );
+      loadProducts();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
+  const productName = (id) => products.find((p) => p.id === id)?.name || "General";
   return (
     <div data-testid="admin-page" className="mx-auto max-w-[1400px] px-5 py-14 lg:px-10 lg:py-20">
       <p className="text-[10px] uppercase tracking-[0.3em] text-[#00ffcc]">// operator console</p>
@@ -263,6 +274,7 @@ export default function Admin() {
           syncBusy={syncBusy}
           onCheckSync={() => runSync(false)}
           onPushSync={() => runSync(true)}
+          onSyncImages={syncImages}
         />
       )}
 

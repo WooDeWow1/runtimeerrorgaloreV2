@@ -1,4 +1,4 @@
-import { Pencil, Plus, Star, Trash2, UploadCloud } from "lucide-react";
+import { Image as ImageIcon, Pencil, Plus, Star, Trash2, UploadCloud } from "lucide-react";
 import { money } from "@/lib/api";
 import { ProductEditor } from "@/components/admin/ProductEditor";
 
@@ -131,6 +131,7 @@ export const ProductsTab = ({
   syncBusy,
   onCheckSync,
   onPushSync,
+  onSyncImages,
 }) => (
   <div className="mt-10" data-testid="admin-products-list">
     <CatalogSyncPanel
@@ -143,16 +144,26 @@ export const ProductsTab = ({
 
     <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
       <p className="max-w-2xl text-[10px] leading-relaxed text-zinc-600">
-        Add or edit products here — the SellAuth variant ID and live price are pulled from your SellAuth
-        dashboard automatically. Images are read from frontend/public/images.
+        Add or edit products here — the SellAuth variant ID, live price and product image are pulled
+        from your SellAuth dashboard automatically. Only the two Coming Soon Shundo products use a
+        local image file.
       </p>
-      <button
-        data-testid="new-product-btn"
-        onClick={() => setEditingProduct("new")}
-        className="flex items-center gap-2 border border-[#00ffcc] px-4 py-2 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
-      >
-        <Plus className="h-3 w-3" /> Add product
-      </button>
+      <div className="flex flex-wrap gap-3">
+        <button
+          data-testid="sync-images-btn"
+          onClick={onSyncImages}
+          className="flex items-center gap-2 border border-zinc-800 px-4 py-2 text-[10px] uppercase tracking-[0.25em] text-zinc-400 transition-colors hover:border-[#00ffcc] hover:text-[#00ffcc]"
+        >
+          <ImageIcon className="h-3 w-3" /> Refresh images
+        </button>
+        <button
+          data-testid="new-product-btn"
+          onClick={() => setEditingProduct("new")}
+          className="flex items-center gap-2 border border-[#00ffcc] px-4 py-2 text-[10px] uppercase tracking-[0.25em] text-[#00ffcc] transition-colors hover:bg-[#00ffcc] hover:text-black"
+        >
+          <Plus className="h-3 w-3" /> Add product
+        </button>
+      </div>
     </div>
 
     {editingProduct && (

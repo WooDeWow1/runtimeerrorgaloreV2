@@ -29,6 +29,15 @@ class SellAuthPlanError(SellAuthError):
     pass
 
 
+def _image_url(product: dict) -> str:
+    """First gallery image in SellAuth order, so the storefront never needs a local file."""
+    images = sorted(
+        product.get("images") or [],
+        key=lambda i: (i.get("pivot") or {}).get("order", 0),
+    )
+    return next((i["url"] for i in images if i.get("url")), "")
+
+
 async def fetch_product(product_id: int) -> dict:
     """Look up a SellAuth product so the admin only ever types its id."""
     async with httpx.AsyncClient(timeout=25) as client:
@@ -58,6 +67,7 @@ async def fetch_product(product_id: int) -> dict:
         "price": float(variant["price"]),
         "name": name,
         "description": product.get("description") or "",
+        "image_url": _image_url(product),
         "variants": [
             {"label": short_label(v.get("name")), "sellauth_variant_id": int(v["id"]),
              "price": float(v["price"])}
