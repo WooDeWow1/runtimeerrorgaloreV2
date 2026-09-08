@@ -35,7 +35,7 @@ export default function Home() {
         <video
           data-testid="hero-video"
           src={HERO_VIDEO}
-          poster="/images/Mainpage.jpg"
+          poster="/images/video-thumb.png"
           autoPlay
           muted
           loop

@@ -2018,7 +2018,7 @@ app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=[o.strip() for o in os.environ["CORS_ORIGINS"].split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2050,7 +2050,7 @@ SEED_PRODUCTS = [
     {"name": "Platinum Medal — Full Set Grind",
      "description": "Full sweep of the medal board to Platinum, handled by our operator fleet across multiple sessions.",
      "category": "medals", "price": 99.99, "msrp": 199.99, "badge": "BEST VALUE",
-     "is_featured": True, "image_url": "/images/platinum-medal-set.jpg"},
+     "is_featured": True, "image_url": "/images/platinum-medal.jpg"},
     {"name": "1M Stardust Farming",
      "description": "Operator-farmed 1,000,000 Stardust delivered to your account. Ideal for a few second moves and trades.",
      "category": "stardust", "price": 19.99, "msrp": 39.99, "badge": "STARTER",
