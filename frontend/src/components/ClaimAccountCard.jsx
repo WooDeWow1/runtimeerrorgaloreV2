@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { api, apiError, setToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
-export const ClaimAccountCard = ({ orderId, email }) => {
+export const ClaimAccountCard = ({ orderId, email, accessKey = "" }) => {
   const { refresh } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
@@ -16,7 +16,11 @@ export const ClaimAccountCard = ({ orderId, email }) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/claim-order", { order_id: orderId, password });
+      const { data } = await api.post("/auth/claim-order", {
+        order_id: orderId,
+        password,
+        key: accessKey,
+      });
       setToken(data.access_token);
       await refresh();
       setDone(true);

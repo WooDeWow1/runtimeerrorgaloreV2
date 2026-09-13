@@ -3,16 +3,17 @@ import { Send } from "lucide-react";
 import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
 
-export const OrderChat = ({ orderId }) => {
+export const OrderChat = ({ orderId, accessKey = "" }) => {
   const [messages, setMessages] = useState([]);
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const endRef = useRef(null);
+  const params = accessKey ? { k: accessKey } : {};
 
   const load = async () => {
     try {
-      const { data } = await api.get(`/orders/${orderId}/messages`);
+      const { data } = await api.get(`/orders/${orderId}/messages`, { params });
       setMessages(data);
       setLoadError(false);
     } catch {
@@ -36,7 +37,7 @@ export const OrderChat = ({ orderId }) => {
     if (!body.trim()) return;
     setSending(true);
     try {
-      await api.post(`/orders/${orderId}/messages`, { body });
+      await api.post(`/orders/${orderId}/messages`, { body }, { params });
       setBody("");
       await load();
     } catch (err) {

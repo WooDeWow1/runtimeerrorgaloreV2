@@ -13,6 +13,7 @@ export default function PaymentSuccess() {
   const payUrl = localStorage.getItem("pokeforge_checkout_url");
   const [state, setState] = useState("checking");
   const [orderId, setOrderId] = useState(null);
+  const [orderKey, setOrderKey] = useState("");
   const [orderEmail, setOrderEmail] = useState("");
   const { clear } = useCart();
   const { user } = useAuth();
@@ -24,10 +25,10 @@ export default function PaymentSuccess() {
   useEffect(() => {
     if (!orderId) return;
     api
-      .get(`/orders/${orderId}`)
+      .get(`/orders/${orderId}`, { params: orderKey ? { k: orderKey } : {} })
       .then(({ data }) => setOrderEmail(data.user_email || ""))
       .catch(() => {});
-  }, [orderId]);
+  }, [orderId, orderKey]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -42,6 +43,7 @@ export default function PaymentSuccess() {
         const { data } = await api.get(`/checkout-sessions/${sessionId}`);
         if (data.order_id) {
           setOrderId(data.order_id);
+          setOrderKey(data.order_key || "");
           setState("paid");
           if (!cleared.current) {
             cleared.current = true;
@@ -107,7 +109,7 @@ export default function PaymentSuccess() {
             change to Processing when an operator logs in — stay logged out then.
           </p>
           <Link
-            to={`/order/${orderId}`}
+            to={`/order/${orderId}${orderKey ? `?k=${orderKey}` : ""}`}
             data-testid="view-order-btn"
             className="mt-8 inline-block border border-[#00ffcc] px-8 py-3 text-[11px] uppercase tracking-[0.3em] text-[#00ffcc] hover:bg-[#00ffcc] hover:text-black"
           >
@@ -118,10 +120,10 @@ export default function PaymentSuccess() {
             <h2 className="mb-4 text-[11px] uppercase tracking-[0.25em] text-zinc-300">
               Chat with support
             </h2>
-            <OrderChat orderId={orderId} />
+            <OrderChat orderId={orderId} accessKey={orderKey} />
           </div>
 
-          {!user && <ClaimAccountCard orderId={orderId} email={orderEmail} />}
+          {!user && <ClaimAccountCard orderId={orderId} email={orderEmail} accessKey={orderKey} />}
         </>
       )}
       {state === "pending" && (

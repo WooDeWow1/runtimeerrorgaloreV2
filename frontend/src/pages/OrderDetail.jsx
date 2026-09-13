@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { api, apiError, money, STATUS_LABELS } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -9,19 +9,21 @@ const STEPS = ["pending", "processing", "completed"];
 
 export default function OrderDetail() {
   const { id } = useParams();
+  const [params] = useSearchParams();
+  const accessKey = params.get("k") || "";
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () =>
       api
-        .get(`/orders/${id}`)
+        .get(`/orders/${id}`, { params: accessKey ? { k: accessKey } : {} })
         .then(({ data }) => setOrder(data))
         .catch((e) => setError(apiError(e)));
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
-  }, [id]);
+  }, [id, accessKey]);
 
   if (error)
     return <div data-testid="order-error" className="mx-auto max-w-xl px-5 py-24 text-xs text-[#ff3b30]">{error}</div>;
@@ -88,7 +90,7 @@ export default function OrderDetail() {
       </div>
 
       <div className="lg:col-span-5">
-        <OrderChat orderId={order.id} />
+        <OrderChat orderId={order.id} accessKey={accessKey} />
       </div>
     </div>
   );

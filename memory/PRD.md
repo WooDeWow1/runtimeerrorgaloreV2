@@ -169,3 +169,11 @@ separately verified outbound domain (iCloud custom domains cannot do API sending
 - Frontend: components/PopupManager.jsx site-wide (delay / page_views / exit_checkout triggers, Escape close, localStorage suppression key pokeforge_popup_<id>, prefills logged-in email). Checkout auto-applies ?code=.
 - CartContext now persists the applied coupon in localStorage (pokeforge_coupon) and re-prices it on load, so the come-back popup never re-fires after a hard reload.
 - Admin Waitlist labels promo_list rows as "Promo list / specials" (flows into CSV export).
+
+## 2026-06 Security hardening (audit P0+P1)
+- CORS_ORIGINS now includes https://pokecoins.cc,https://www.pokecoins.cc (+ preview, localhost). csrf_guard middleware: cookie-auth POST/PUT/PATCH/DELETE needs same-host or allowlisted Origin (Bearer callers exempt).
+- ADMIN_PASSWORD rotated to acientraft2020 (user to change in-app).
+- Per-IP rate limits (rate_limits collection, TTL 48h): popup offer 3/day, popup submit 10/h, waitlist 10/h, claim-order 5/h. Popup coupons scoped to signed-in email.
+- Guest order access keys: orders.access_key, emailed links carry ?k=, required for guest GET /orders/{id}, /messages and /auth/claim-order. Legacy orders without a key still open (see iteration_28 note before removing that branch).
+- Webhook: HMAC signature only (no ?secret=). Login lockout keys on rightmost X-Forwarded-For hop. Markdown hrefs limited to http(s)/mailto/relative.
+- Verified: iteration_28.json 29/29 backend + all frontend flows pass.

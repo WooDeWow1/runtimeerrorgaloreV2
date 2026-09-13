@@ -19,6 +19,7 @@ import jwt  # noqa: E402
 from bson import ObjectId  # noqa: E402
 from bson.errors import InvalidId  # noqa: E402
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 from pymongo.errors import DuplicateKeyError  # noqa: E402
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
@@ -105,6 +106,30 @@ MIN_CHARGE = 0.50
 app = FastAPI(title="PokeCoins API")
 api = APIRouter(prefix="/api")
 
+ALLOWED_ORIGINS = [o.strip() for o in os.environ["CORS_ORIGINS"].split(",") if o.strip()]
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def csrf_guard(request: Request, call_next):
+    """Auth cookies have to be SameSite=none for the preview domain, so a cookie-authenticated
+    write must additionally prove it came from one of our own origins. Bearer-token callers are
+    exempt: a cross-site page cannot set that header without a preflight we would reject."""
+    if (request.method in UNSAFE_METHODS
+            and request.cookies.get("access_token")
+            and not request.headers.get("Authorization", "").startswith("Bearer ")):
+        origin = request.headers.get("origin") or ""
+        if not origin:
+            referer = request.headers.get("referer") or ""
+            origin = "/".join(referer.split("/")[:3]) if referer else ""
+        # The ingress rewrites Origin/Host to an internal hostname, so a same-host match counts
+        # as same-site; a third-party page still arrives with its own origin and is blocked.
+        same_host = bool(origin) and origin.split("://")[-1] == request.headers.get("host", "")
+        if not same_host and origin not in ALLOWED_ORIGINS:
+            logger.warning("CSRF block: origin=%r path=%s", origin, request.url.path)
+            return JSONResponse(status_code=403, content={"detail": "Cross-site request blocked"})
+    return await call_next(request)
+
 
 def oid(value: str) -> ObjectId:
     try:
@@ -189,11 +214,16 @@ async def register(payload: RegisterRequest, response: Response):
 
 
 @api.post("/auth/claim-order")
-async def claim_order(payload: ClaimOrderRequest, response: Response):
-    """Create an account from a completed guest order and attach that buyer's orders to it."""
+async def claim_order(payload: ClaimOrderRequest, request: Request, response: Response):
+    """Create an account from a completed guest order and attach that buyer's orders to it.
+    The order's access key proves the caller received that buyer's confirmation email."""
+    await rate_limit(request, "claim-order", 5, 60)
     order = await db.orders.find_one({"_id": oid(payload.order_id)})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if not guest_access_ok(order, payload.key):
+        raise HTTPException(status_code=403,
+                            detail="Open this order from the link in your confirmation email")
     if order.get("user_id"):
         raise HTTPException(status_code=400, detail="This order already belongs to an account")
     email = order["user_email"].lower()
@@ -564,6 +594,7 @@ def order_response(doc: dict, include_credentials: bool = False) -> dict:
     data = order.model_dump(by_alias=False)
     data.pop("ptc_username_enc", None)
     data.pop("ptc_password_enc", None)
+    data.pop("access_key", None)
     data["ptc_username_masked"] = "•" * 8
     if include_credentials:
         data["ptc_username"] = decrypt_secret(doc["ptc_username_enc"])
@@ -879,7 +910,8 @@ async def send_order_confirmation(session: dict, order_id: str) -> None:
             subject=f"Payment received — track your {os.environ['EMAIL_FROM_NAME']} order",
             html=order_tracking_html(
                 order_id=order_id,
-                tracking_url=order_url({"origin_url": session.get("origin_url", ""), "id": order_id}),
+                tracking_url=order_url({"origin_url": session.get("origin_url", ""), "id": order_id,
+                                        "access_key": session.get("access_key", "")}),
                 total=session["total"],
                 item_lines=[
                     f"{i['name']}{' — ' + i['variant_label'] if i.get('variant_label') else ''} x{i['quantity']}"
@@ -897,6 +929,7 @@ async def create_order_from_session(session: dict) -> Optional[str]:
         return session["order_id"]
     order = Order(
         user_id=session.get("user_id", ""),
+        access_key=secrets.token_urlsafe(16),
         user_email=session["email"],
         origin_url=session.get("origin_url", ""),
         items=[OrderItem(**i) for i in session["items"]],
@@ -915,8 +948,10 @@ async def create_order_from_session(session: dict) -> Optional[str]:
     result = await db.orders.insert_one(order.to_mongo())
     order_id = str(result.inserted_id)
     await record_redemption(session, order_id)
+    session = {**session, "access_key": order.access_key}
     await db.checkout_sessions.update_one(
-        {"_id": session["_id"]}, {"$set": {"status": "paid", "order_id": order_id}}
+        {"_id": session["_id"]},
+        {"$set": {"status": "paid", "order_id": order_id, "access_key": order.access_key}}
     )
     await notify(session.get("user_id", ""), order_id, "Order received",
                  "Payment confirmed. Your order is queued — an operator will pick it up shortly.")
@@ -939,7 +974,7 @@ def webhook_signature_ok(raw: bytes, request: Request) -> bool:
     )
     if verify_webhook_signature(raw, signature):
         return True
-    return request.query_params.get("secret") == SELLAUTH_WEBHOOK_SECRET
+    return False
 
 
 def _unwrap_invoice(payload: dict) -> dict:
@@ -1038,6 +1073,7 @@ async def checkout_session_status(session_id: str):
         "session_id": session_id,
         "status": session.get("status", "awaiting_payment"),
         "order_id": session.get("order_id"),
+        "order_key": session.get("access_key", ""),
         "expires_at": session.get("expires_at"),
     }
 
@@ -1500,14 +1536,29 @@ async def delete_order(order_id: str, admin: dict = Depends(get_admin_user)):
     return {"ok": True}
 
 
+def guest_access_ok(doc: dict, key: Optional[str]) -> bool:
+    """A guest order is opened with the unguessable key from its confirmation email. Orders
+    emailed before keys existed have none, and keep working from their original link."""
+    expected = doc.get("access_key")
+    if not expected:
+        return True
+    return bool(key) and secrets.compare_digest(key, expected)
+
+
 @api.get("/orders/{order_id}")
-async def get_order(order_id: str, user: Optional[dict] = Depends(get_optional_user)):
+async def get_order(order_id: str, k: Optional[str] = None,
+                    user: Optional[dict] = Depends(get_optional_user)):
     doc = await db.orders.find_one({"_id": oid(order_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Order not found")
     owner = doc.get("user_id") or ""
-    if owner and (not user or (user.get("role") != "admin" and owner != str(user["_id"]))):
-        raise HTTPException(status_code=403, detail="Not your order")
+    is_admin = bool(user and user.get("role") == "admin")
+    if owner:
+        if not is_admin and (not user or owner != str(user["_id"])):
+            raise HTTPException(status_code=403, detail="Not your order")
+    elif not is_admin and not guest_access_ok(doc, k):
+        raise HTTPException(status_code=403,
+                            detail="Open this order from the link in your confirmation email")
     return order_response(doc)
 
 
@@ -1561,26 +1612,34 @@ async def update_status(order_id: str, payload: StatusUpdate, admin: dict = Depe
 
 
 # ---------------- Messaging ----------------
-async def assert_order_access(order_id: str, user: Optional[dict]) -> dict:
+async def assert_order_access(order_id: str, user: Optional[dict],
+                              key: Optional[str] = None) -> dict:
     doc = await db.orders.find_one({"_id": oid(order_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Order not found")
     owner = doc.get("user_id") or ""
-    if owner and (not user or (user.get("role") != "admin" and owner != str(user["_id"]))):
-        raise HTTPException(status_code=403, detail="Not your order")
+    is_admin = bool(user and user.get("role") == "admin")
+    if owner:
+        if not is_admin and (not user or owner != str(user["_id"])):
+            raise HTTPException(status_code=403, detail="Not your order")
+    elif not is_admin and not guest_access_ok(doc, key):
+        raise HTTPException(status_code=403,
+                            detail="Open this order from the link in your confirmation email")
     return doc
 
 
 @api.get("/orders/{order_id}/messages")
-async def list_messages(order_id: str, user: Optional[dict] = Depends(get_optional_user)):
-    await assert_order_access(order_id, user)
+async def list_messages(order_id: str, k: Optional[str] = None,
+                        user: Optional[dict] = Depends(get_optional_user)):
+    await assert_order_access(order_id, user, k)
     docs = await db.messages.find({"order_id": order_id}).sort("created_at", 1).to_list(500)
     return [Message.from_mongo(d).model_dump(by_alias=False) for d in docs]
 
 
 @api.post("/orders/{order_id}/messages")
-async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] = Depends(get_optional_user)):
-    order = await assert_order_access(order_id, user)
+async def post_message(order_id: str, payload: MessageIn, k: Optional[str] = None,
+                       user: Optional[dict] = Depends(get_optional_user)):
+    order = await assert_order_access(order_id, user, k)
     role = user.get("role", "customer") if user else "customer"
     msg = Message(
         order_id=order_id,
@@ -1601,7 +1660,8 @@ async def post_message(order_id: str, payload: MessageIn, user: Optional[dict] =
                 html=support_reply_html(
                     order_id=order_id,
                     body=payload.body,
-                    order_url=order_url({"origin_url": order.get("origin_url", ""), "id": order_id}),
+                    order_url=order_url({"origin_url": order.get("origin_url", ""), "id": order_id,
+                                         "access_key": order.get("access_key", "")}),
                 ),
             )
         except Exception as exc:
@@ -1947,8 +2007,20 @@ async def delete_review(review_id: str, lock: bool = True, admin: dict = Depends
 def client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # The ingress appends the address it saw last; earlier entries are client supplied and
+        # would let an attacker rotate past the lockout by spoofing the header.
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
+
+
+async def rate_limit(request: Request, action: str, limit: int, window_minutes: int) -> None:
+    """Per-IP cap for unauthenticated writes (coupon minting, list signups)."""
+    key = f"{action}:{client_ip(request)}"
+    cutoff = utc_now() - timedelta(minutes=window_minutes)
+    await db.rate_limits.delete_many({"key": key, "created_at": {"$lt": cutoff}})
+    if await db.rate_limits.count_documents({"key": key}) >= limit:
+        raise HTTPException(status_code=429, detail="Too many requests — please try again later.")
+    await db.rate_limits.insert_one({"key": key, "created_at": utc_now()})
 
 
 async def lookup_country(ip: str) -> str:
@@ -2072,7 +2144,8 @@ async def list_active_popups():
 
 
 @api.post("/popups/{popup_id}/submit")
-async def submit_popup(popup_id: str, payload: PopupSubmission):
+async def submit_popup(popup_id: str, payload: PopupSubmission, request: Request):
+    await rate_limit(request, "popup-submit", 10, 60)
     popup = await get_popup(popup_id)
     product_id = popup.get("waitlist_product_id") or PROMO_WAITLIST_ID
     await db.waitlist.update_one(
@@ -2086,8 +2159,11 @@ async def submit_popup(popup_id: str, payload: PopupSubmission):
 
 
 @api.post("/popups/{popup_id}/offer")
-async def popup_offer(popup_id: str, user: Optional[dict] = Depends(get_optional_user)):
-    """Mints a real single-use code through the shared auto-coupon generator."""
+async def popup_offer(popup_id: str, request: Request,
+                      user: Optional[dict] = Depends(get_optional_user)):
+    """Mints a real single-use code through the shared auto-coupon generator. Capped per IP so
+    the offer cannot be farmed, and tied to the signed-in buyer when there is one."""
+    await rate_limit(request, "popup-offer", 3, 1440)
     popup = await get_popup(popup_id)
     if popup.get("type") != "discount_offer":
         raise HTTPException(status_code=400, detail="That popup does not carry an offer")
@@ -2096,6 +2172,7 @@ async def popup_offer(popup_id: str, user: Optional[dict] = Depends(get_optional
         float(popup.get("coupon_percent_off") or 5),
         int(popup.get("coupon_expiry_days") or 7),
         f"Popup offer: {popup.get('name', '')}",
+        issued_to=user["email"] if user else None,
         excluded_categories=popup.get("coupon_excluded_categories") or ["event_pass"],
     )
     if not coupon:
@@ -2133,7 +2210,8 @@ async def admin_delete_popup(popup_id: str, admin: dict = Depends(get_admin_user
 
 # ---------------- Waitlist ----------------
 @api.post("/waitlist")
-async def join_waitlist(payload: WaitlistIn):
+async def join_waitlist(payload: WaitlistIn, request: Request):
+    await rate_limit(request, "waitlist", 10, 60)
     await db.waitlist.update_one(
         {"email": payload.email.lower(), "product_id": payload.product_id},
         {"$set": {"email": payload.email.lower(), "product_id": payload.product_id,
@@ -2173,7 +2251,7 @@ app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.environ["CORS_ORIGINS"].split(",") if o.strip()],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2253,6 +2331,8 @@ INDEXES = [
     ("coupons", "code", {"unique": True}),
     ("coupon_redemptions", [("code", 1), ("email", 1)], {"unique": True}),
     ("reviews", "order_id", {"unique": True}),
+    ("rate_limits", "key", {}),
+    ("rate_limits", "created_at", {"expireAfterSeconds": 172800}),
 ]
 
 

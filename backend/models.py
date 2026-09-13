@@ -58,6 +58,7 @@ class ClaimOrderRequest(BaseModel):
     order_id: str
     password: str = Field(min_length=6)
     name: str = ""
+    key: str = ""
 
 
 # ---------- Products ----------
@@ -277,6 +278,7 @@ class PayoutMethodSettings(BaseModel):
 
 class Order(BaseDocument):
     user_id: str = ""
+    access_key: str = ""
     user_email: str
     origin_url: str = ""
     items: List[OrderItem]

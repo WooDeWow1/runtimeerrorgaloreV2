@@ -122,8 +122,11 @@ def support_line() -> str:
 
 
 def order_url(order: dict) -> str:
-    """Absolute link to an order page. Always the public site so emailed links work anywhere."""
-    return f"{_site_url()}/order/{order['id'] if 'id' in order else order['_id']}"
+    """Absolute link to an order page. Always the public site so emailed links work anywhere.
+    Guest orders carry their access key so only the buyer's own email opens them."""
+    order_id = order["id"] if "id" in order else order["_id"]
+    key = order.get("access_key") or ""
+    return f"{_site_url()}/order/{order_id}" + (f"?k={key}" if key else "")
 
 
 def admin_order_url(order_id: str) -> str:

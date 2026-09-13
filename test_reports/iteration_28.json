@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 28 — regression + security verification after the P0/P1 hardening pass. 29/29 pytest cases pass and every Playwright flow succeeds. Verified: (a) admin password rotated ('admin' rejected, 'acientraft2020' accepted, redirects to /admin); (b) CSRF guard blocks cookie-only unsafe writes from a foreign Origin (403 'Cross-site request blocked') and lets Bearer-auth calls through; (c) /api/admin/* returns 401 anonymously and 403 for logged-in customers (GET + write); (d) customer A cannot read customer B's order or its messages (403); (e) guest order with an access_key returns 403 without ?k= (with the 'confirmation email' message) and 200 with the right ?k=; guest order /messages GET honours the same key; legacy guest orders (no access_key) still open without ?k=; (f) popup discount-offer endpoint mints only 3 successes per IP per day and returns 429 afterwards; coupons and rate_limits rows cleaned up; (g) legal page renders terms + privacy with 18 sanitised links, no console errors, no raw HTML leak; (h) every admin tab (orders, products, categories, coupons, reviews, legal, payouts, affiliates, waitlist, popups, settings) mounts with zero console errors; (i) customer register → /dashboard, /products lists items, add-to-cart works, cart drawer opens with count=1. All 10 admin GET sweeps return 200. All 7 public GET sweeps return 200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_security_hardening_v28.py",
+    "/app/test_reports/pytest/iter28.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1539 guest_access_ok returns True when the order has no access_key. That's the correct 'legacy compat' behaviour called out in the review request, but it means any future backfill/migration MUST set access_key on old rows before the compat branch is removed — otherwise those orders instantly become inaccessible. Consider a one-shot migration + a feature flag.",
+    "server.py:114 csrf_guard falls back to Referer when Origin is missing. That is standard, but note the same-host check uses request.headers['host'] which behind the ingress rewrite happens to match the internal hostname — this is why 'same host' passes for our own frontend. Add a code comment tying that to the specific ingress behaviour so it does not regress if the ingress ever stops rewriting Host.",
+    "server.py: rate_limits collection is capped by count within the sliding window but there is no per-user cap when a buyer is logged in — a signed-in customer could still burn the shared per-IP popup-offer cap for everyone behind the same NAT. Low risk for now since the cap is 3/day."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_hardening_v28.py"
+  ],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "100% (all flows pass)"},
+  "test_credentials": "Admin officialwifi@icloud.com / acientraft2020 (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Two throwaway customer accounts (test_sec_*@example.com) created via /auth/register for isolation tests. Their orders were seeded/cleaned directly in Mongo. A guest order (guest_sec_*@example.com) and a legacy guest order (legacy_sec_*@example.com) were inserted+deleted for access_key tests. Two more customers (test_reg_*@example.com) created via Playwright register flow. rate_limits and 'Popup offer:' auto-coupons cleared at end of popup rate-limit test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_security_hardening_v28.py is idempotent and safe to rerun: it clears popup-offer rate_limits before + after, cleans up its seeded orders in Mongo, and creates fresh throwaway users. For CSRF, an Origin header pointing at REACT_APP_BACKEND_URL is accepted; anything else with cookie-only auth gets 403. Guest access uses ?k=<access_key>; missing/wrong key => 403 'Open this order from the link in your confirmation email'.",
+  "rca of the issue": "n/a — no bugs found."
+}

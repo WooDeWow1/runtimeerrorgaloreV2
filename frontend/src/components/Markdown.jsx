@@ -1,5 +1,9 @@
 const ID_MAP = { "7. refunds and cancellation": "refunds" };
 
+const SAFE_URL = /^(https?:|mailto:|\/)/i;
+
+const href = (url) => (SAFE_URL.test(url.trim()) ? url.trim() : "#");
+
 const inline = (text) =>
   text
     .replace(/&/g, "&amp;")
@@ -7,7 +11,8 @@ const inline = (text) =>
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white">$1</strong>')
     .replace(
       /\[(.+?)\]\((.+?)\)/g,
-      '<a href="$2" class="text-[#00ffcc] underline decoration-dotted">$1</a>'
+      (_m, label, url) =>
+        `<a href="${href(url)}" class="text-[#00ffcc] underline decoration-dotted">${label}</a>`
     )
     .replace(
       /(^|[\s(])((?:https?:\/\/|www\.)[^\s)]+)/g,
