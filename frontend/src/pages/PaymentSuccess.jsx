@@ -10,6 +10,7 @@ import { ClaimAccountCard } from "@/components/ClaimAccountCard";
 export default function PaymentSuccess() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id") || localStorage.getItem("pokeforge_checkout_session");
+  const sessionToken = params.get("t") || localStorage.getItem("pokeforge_checkout_token");
   const payUrl = localStorage.getItem("pokeforge_checkout_url");
   const [state, setState] = useState("checking");
   const [orderId, setOrderId] = useState(null);
@@ -40,7 +41,9 @@ export default function PaymentSuccess() {
     const poll = async () => {
       attempts += 1;
       try {
-        const { data } = await api.get(`/checkout-sessions/${sessionId}`);
+        const { data } = await api.get(`/checkout-sessions/${sessionId}`, {
+          params: sessionToken ? { t: sessionToken } : {},
+        });
         if (data.order_id) {
           setOrderId(data.order_id);
           setOrderKey(data.order_key || "");

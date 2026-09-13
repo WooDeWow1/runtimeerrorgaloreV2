@@ -848,6 +848,7 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
         "coupon_code": coupon_code,
         "accepted_terms_at": utc_now(),
         "terms_version": TERMS_VERSION,
+        "session_token": secrets.token_urlsafe(24),
         "ref": (payload.ref or "").strip().upper()[:16] or None,
         "user_id": user_id,
         "email": email,
@@ -878,6 +879,7 @@ async def checkout(payload: CheckoutRequest, user: Optional[dict] = Depends(get_
     return {
         "checkout_url": checkout_data["url"],
         "session_id": session_id,
+        "session_token": session_doc["session_token"],
         "invoice_id": checkout_data["invoice_id"],
     }
 
@@ -1060,10 +1062,15 @@ async def sellauth_webhook(request: Request):
 
 
 @api.get("/checkout-sessions/{session_id}")
-async def checkout_session_status(session_id: str):
+async def checkout_session_status(session_id: str, t: Optional[str] = None):
     session = await db.checkout_sessions.find_one({"_id": oid(session_id)})
     if not session:
         raise HTTPException(status_code=404, detail="Checkout session expired or not found")
+    # The session token is the unguessable secret the buyer's browser holds; without it the
+    # session id alone must never surface the order or its access key.
+    expected_token = session.get("session_token")
+    if expected_token and not (t and secrets.compare_digest(t, expected_token)):
+        raise HTTPException(status_code=403, detail="Invalid or missing session token")
     if not session.get("order_id") and session.get("invoice_id"):
         invoice = await sellauth.get_invoice(session["invoice_id"])
         if invoice and sellauth.is_paid(invoice):
@@ -1537,11 +1544,11 @@ async def delete_order(order_id: str, admin: dict = Depends(get_admin_user)):
 
 
 def guest_access_ok(doc: dict, key: Optional[str]) -> bool:
-    """A guest order is opened with the unguessable key from its confirmation email. Orders
-    emailed before keys existed have none, and keep working from their original link."""
+    """A guest order is opened only with the unguessable key from its confirmation email.
+    Keyless orders (backfilled at startup) are never guest-readable by id alone."""
     expected = doc.get("access_key")
     if not expected:
-        return True
+        return False
     return bool(key) and secrets.compare_digest(key, expected)
 
 
@@ -2520,7 +2527,17 @@ async def seed_data():
     await migrate_hunting_category()
     await seed_variants()
     await migrate_rocket_variants()
+    await backfill_order_keys()
     await purge_expired_credentials()
+
+
+async def backfill_order_keys() -> None:
+    """Give any legacy keyless order an access_key so guest reads are never open by id alone."""
+    cursor = db.orders.find({"$or": [{"access_key": {"$exists": False}}, {"access_key": ""}]},
+                            {"_id": 1})
+    async for doc in cursor:
+        await db.orders.update_one(
+            {"_id": doc["_id"]}, {"$set": {"access_key": secrets.token_urlsafe(16)}})
 
 
 @app.on_event("shutdown")

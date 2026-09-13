@@ -53,10 +53,11 @@ export default function Checkout() {
         accepted_terms: acceptedTerms,
       });
       localStorage.setItem("pokeforge_checkout_session", data.session_id);
+      localStorage.setItem("pokeforge_checkout_token", data.session_token || "");
       localStorage.setItem("pokeforge_checkout_url", data.checkout_url);
       if (payWindow && !payWindow.closed) payWindow.location.href = data.checkout_url;
       else window.open(data.checkout_url, "_blank", "noopener");
-      navigate(`/payment/success?session_id=${data.session_id}`);
+      navigate(`/payment/success?session_id=${data.session_id}&t=${encodeURIComponent(data.session_token || "")}`);
     } catch (err) {
       if (payWindow && !payWindow.closed) payWindow.close();
       const msg = apiError(err);

@@ -177,3 +177,17 @@ separately verified outbound domain (iCloud custom domains cannot do API sending
 - Guest order access keys: orders.access_key, emailed links carry ?k=, required for guest GET /orders/{id}, /messages and /auth/claim-order. Legacy orders without a key still open (see iteration_28 note before removing that branch).
 - Webhook: HMAC signature only (no ?secret=). Login lockout keys on rightmost X-Forwarded-For hop. Markdown hrefs limited to http(s)/mailto/relative.
 - Verified: iteration_28.json 29/29 backend + all frontend flows pass.
+
+## 2026-06 Security re-audit fixes (SEC-001 / SEC-002)
+- Re-audit verdict: CONDITIONAL PASS. CSRF, admin-password rotation, and rate limits all PASS.
+  Two guest-order IDOR gaps remained and are now fixed:
+- SEC-001 (was P2): GET /api/checkout-sessions/{id} used to return the order's `access_key`
+  (`order_key`) with no auth, so a guessed session id leaked guest order + chat. Fix: checkout
+  session now mints an unguessable `session_token` (returned to the buyer at /orders/checkout);
+  the status endpoint requires `?t=<token>` and 403s without it before exposing order_id/order_key.
+  Frontend: Checkout.jsx stores the token (localStorage + `&t=` on /payment/success URL);
+  PaymentSuccess.jsx passes it when polling.
+- SEC-002 (was P3): `guest_access_ok` used to allow keyless guest orders to be read by id alone.
+  Fix: it now returns False when an order has no `access_key`; `backfill_order_keys()` runs on
+  boot and gave all 189 legacy orders a key (0 keyless remaining).
+- Verified via curl: no/wrong token → 403, correct token → 200; DB check confirms 0 keyless orders.
