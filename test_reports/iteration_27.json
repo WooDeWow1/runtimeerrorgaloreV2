@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend-only end-to-end verification of the two required popups plus the new Admin Popups CRUD tab. All 10 requested test cases pass. Promo email capture popup appears ~10s after homepage load, submits into Mongo waitlist with product_id=promo_list and source=promo_popup (verified via /api/admin/waitlist), respects 14-day localStorage suppression after both submit AND dismiss, closes on Escape and never blocks scrolling. Abandoned-checkout popup fires only after visiting /checkout with items and leaving without paying, mints a real COMEBACK single-use coupon (verified: COMEBACK42A062 etc.), Apply & return re-lands on /checkout with -5% discount visible (checkout-discount, checkout-coupon-applied). It is correctly suppressed when cart is empty and when a coupon is already applied (soft nav). Admin -> Popups tab lists both seeded popups, all fields editable; headline change persists after reload; New popup creates + saves + deletes; toggling Enabled off immediately hides the popup on the public site.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Abandoned-checkout suppression on hard reload", "issue": "The applied coupon lives only in React state (CartContext) and is not persisted to localStorage. If a user applies a coupon on /checkout and then does a hard reload / uses the browser back button to /, the coupon state is lost and the abandoned-checkout popup fires, minting a NEW COMEBACK code. Soft navigation via react-router Link correctly suppresses the popup, but the hard-reload path does not honour the 'coupon already applied' rule. Recommend persisting the applied coupon code in localStorage (or reading it back via sessionStorage/pokeforge_on_checkout+code) so PopupManager can suppress it after a hard nav.", "affected_selectors": ["popup-coupon-code", "checkout-coupon-applied"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Consider persisting the applied cart coupon (e.g. pokeforge_coupon in localStorage) so the abandoned-checkout popup does not fire again after a hard reload / browser back when a coupon is already applied. Low priority — soft-nav flow works correctly."
+  ],
+  "critical_code_review_comments": [
+    "PopupManager.jsx: `left` is computed as `location.pathname !== '/checkout' && !startsWith('/payment')` but it is placed OUTSIDE the effect and above the checkout-flag effect. This is fine but a comment would help readers understand the ordering.",
+    "PopupManager.jsx: The `suppress` helper is called both from `close()` and again from `join()` / `applyAndReturn()`, which is redundant but harmless.",
+    "CartContext.jsx: Coupon is not persisted to localStorage, so a page reload silently drops it. This surfaces as the abandoned-checkout suppression gap noted above. Persisting the coupon code (revalidating on load) would also improve UX independently of popups.",
+    "PopupsTab.jsx: Editing rows edits state in place; if the API call in `save` fails after `load()` was skipped, the UI can show stale edits. Consider re-loading on error too. Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% (10/10 requested cases pass; 1 minor edge-case noted)"},
+  "test_credentials": "Admin officialwifi@icloud.com / admin (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Two waitlist rows created via promo popup submissions: test_promo_1789299092@example.com and test_wl_1789299158@example.com (both product_id=promo_list, source=promo_popup). One transient TEST_new_* popup was created and then deleted in Admin. Promo popup title was temporarily changed and then restored to 'Get drop alerts & promos'. Enabled flag was toggled off and back on.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both popups and admin CRUD are working end-to-end. If revisiting, note that: (1) the promo popup uses localStorage key pokeforge_popup_<id> for 14-day suppression - clear it between runs. (2) The abandoned-checkout popup requires sessionStorage flag pokeforge_on_checkout=1 set by visiting /checkout with a non-empty cart. (3) The cart coupon is in-memory only; hard reload after applying a coupon will cause the abandoned popup to fire again - flagged as minor issue.",
+  "rca of the issue": "Minor: abandoned-checkout popup can fire even when a coupon is already applied if the user hard-reloads or uses the browser back button, because CartContext keeps the applied coupon only in React state. PopupManager's guard `if (... || coupon) return;` therefore evaluates coupon=null on a fresh page load. Fix: persist the applied coupon code to localStorage in CartContext and re-validate on mount, OR mirror it into sessionStorage alongside pokeforge_on_checkout so PopupManager can detect it before deciding to fire."
+}

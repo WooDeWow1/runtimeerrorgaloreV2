@@ -7,6 +7,7 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { CartDrawer } from "@/components/CartDrawer";
+import { PopupManager } from "@/components/PopupManager";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useVisitTracker } from "@/hooks/useVisitTracker";
 import { captureRef } from "@/lib/referral";
@@ -67,6 +68,7 @@ function App() {
               />
             </Routes>
             <Footer />
+            <PopupManager />
             <Toaster
               theme="dark"
               position="top-right"

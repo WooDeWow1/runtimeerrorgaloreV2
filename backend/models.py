@@ -236,6 +236,41 @@ class PayoutRequest(BaseModel):
     chain: str = Field(default="", max_length=40)
 
 
+POPUP_TYPES = Literal["email_capture", "discount_offer"]
+POPUP_TRIGGERS = Literal["delay", "page_views", "exit_checkout"]
+
+
+class PopupIn(BaseModel):
+    name: str = Field(min_length=2, max_length=60)
+    type: POPUP_TYPES = "email_capture"
+    enabled: bool = True
+    title: str = Field(min_length=2, max_length=120)
+    body: str = Field(default="", max_length=400)
+    button_label: str = Field(default="Join", max_length=40)
+    dismiss_label: str = Field(default="Not now", max_length=40)
+    collect_email: bool = True
+    collect_name: bool = False
+    trigger: POPUP_TRIGGERS = "delay"
+    delay_seconds: int = Field(default=10, ge=1, le=600)
+    page_views: int = Field(default=2, ge=1, le=20)
+    suppress_days: int = Field(default=14, ge=1, le=365)
+    paths: List[str] = Field(default_factory=list)
+    waitlist_product_id: str = Field(default="promo_list", max_length=60)
+    coupon_percent_off: float = Field(default=5, gt=0, le=100)
+    coupon_prefix: str = Field(default="COMEBACK", min_length=2, max_length=16)
+    coupon_expiry_days: int = Field(default=7, ge=1, le=365)
+    coupon_excluded_categories: List[str] = Field(default_factory=lambda: ["event_pass"])
+
+
+class Popup(BaseDocument, PopupIn):
+    pass
+
+
+class PopupSubmission(BaseModel):
+    email: EmailStr
+    name: str = Field(default="", max_length=80)
+
+
 class PayoutMethodSettings(BaseModel):
     methods: Dict[Literal["cashapp", "btc", "sol", "ltc", "usdc"], bool]
 

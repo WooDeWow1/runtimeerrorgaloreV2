@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiError, money } from "@/lib/api";
@@ -14,7 +14,8 @@ const label = "mb-2 block text-[10px] uppercase tracking-[0.25em] text-zinc-500"
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { items, total, discount, payable, invalid, coupon, cartPayload } = useCart();
+  const [params] = useSearchParams();
+  const { items, total, discount, payable, invalid, coupon, cartPayload, applyCoupon } = useCart();
   const { user } = useAuth();
   const isGuest = !user;
   const [email, setEmail] = useState("");
@@ -24,6 +25,15 @@ export default function Checkout() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  // Code handed out by the come-back popup: /checkout?code=COMEBACKXXXX
+  const linkedCode = params.get("code");
+  const triedCode = useRef(false);
+  useEffect(() => {
+    if (!linkedCode || coupon || items.length === 0 || triedCode.current) return;
+    triedCode.current = true;
+    applyCoupon(linkedCode);
+  }, [linkedCode, coupon, items.length, applyCoupon]);
 
   const submit = async (e) => {
     e.preventDefault();

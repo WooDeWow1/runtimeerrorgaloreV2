@@ -4,6 +4,7 @@ import { api, apiError, money } from "@/lib/api";
 
 const CartContext = createContext(null);
 const KEY = "pokeforge_cart";
+export const COUPON_KEY = "pokeforge_coupon";
 
 const lineKey = (productId, variantId) => `${productId}:${variantId || ""}`;
 
@@ -88,6 +89,7 @@ export function CartProvider({ children }) {
     );
   const clear = () => {
     setItems([]);
+    localStorage.removeItem(COUPON_KEY);
     setCoupon(null);
   };
 
@@ -113,6 +115,7 @@ export function CartProvider({ children }) {
       });
       // Already priced against this exact cart: skip the re-validation effect.
       validated.current = `${trimmed}|${JSON.stringify(cartPayload)}`;
+      localStorage.setItem(COUPON_KEY, trimmed);
       setCoupon(data);
       toast.success(`${data.code} applied — ${data.percent_label} off`);
       return true;
@@ -125,34 +128,36 @@ export function CartProvider({ children }) {
     }
   };
 
-  const clearCoupon = () => setCoupon(null);
+  const clearCoupon = () => {
+    localStorage.removeItem(COUPON_KEY);
+    setCoupon(null);
+  };
 
-  const couponCode = coupon?.code;
+  // An applied code survives a reload: re-price it once the cart is known.
+  const couponCode = coupon?.code || localStorage.getItem(COUPON_KEY) || undefined;
 
   // The cart changed: re-price the applied code (it may now be invalid, e.g. under the minimum).
   useEffect(() => {
     if (!couponCode) return;
     if (items.length === 0) {
-      setCoupon(null);
+      clearCoupon();
       return;
     }
-    let stale = false;
     const signature = `${couponCode}|${JSON.stringify(cartPayload)}`;
     if (validated.current === signature) return;
     validated.current = signature;
+    // The signature is re-checked on settle so a later cart change wins, without dropping the
+    // result of the first call when the effect is invoked twice (StrictMode).
     api
       .post("/coupons/validate", { code: couponCode, items: cartPayload })
       .then(({ data }) => {
-        if (!stale) setCoupon(data);
+        if (validated.current === signature) setCoupon(data);
       })
       .catch((err) => {
-        if (stale) return;
-        setCoupon(null);
+        if (validated.current !== signature) return;
+        clearCoupon();
         toast.error(`${couponCode} removed`, { description: apiError(err) });
       });
-    return () => {
-      stale = true;
-    };
   }, [cartPayload, couponCode, items.length]);
 
   const total = useMemo(

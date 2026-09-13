@@ -161,3 +161,11 @@ separately verified outbound domain (iCloud custom domains cannot do API sending
 - GET/PUT /api/admin/settings/payout-methods (admin only, must keep >=1 enabled).
 - /api/affiliate/me payout.methods now only returns enabled methods; POST /api/affiliate/payout rejects disabled methods.
 - UI: components/admin/PayoutMethodToggles.jsx rendered at top of PayoutsTab; PayoutDialog defaults to first enabled method.
+
+## 2026-06 Popups (promo capture + abandoned checkout)
+- New `popups` Mongo collection + generic engine. Public: GET /api/popups, POST /api/popups/{id}/submit (writes into the SAME waitlist collection, product_id=promo_list, source=promo_popup), POST /api/popups/{id}/offer (mints code via shared issue_auto_coupon()).
+- Admin CRUD /api/admin/popups; new Admin tab "Popups" (components/admin/PopupsTab.jsx) with every field editable + create/delete.
+- Seeded: "Promo & drop alerts" (email capture, 10s delay, 14-day suppress) and "Abandoned checkout 5%" (exit_checkout trigger, COMEBACK prefix, 5%, event_pass excluded, 7-day expiry/suppress).
+- Frontend: components/PopupManager.jsx site-wide (delay / page_views / exit_checkout triggers, Escape close, localStorage suppression key pokeforge_popup_<id>, prefills logged-in email). Checkout auto-applies ?code=.
+- CartContext now persists the applied coupon in localStorage (pokeforge_coupon) and re-prices it on load, so the come-back popup never re-fires after a hard reload.
+- Admin Waitlist labels promo_list rows as "Promo list / specials" (flows into CSV export).

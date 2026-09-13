@@ -51,6 +51,9 @@ from models import (  # noqa: E402
     PasswordChangeRequest,
     CodeChangeRequest,
     LegalUpdate,
+    PopupIn,
+    PopupSubmission,
+    Popup,
     PayoutMethodSettings,
     PayoutRequest,
     Product,
@@ -1717,30 +1720,39 @@ async def sweep_auto_coupons() -> int:
     return result.deleted_count
 
 
-async def issue_review_coupon(review_id: str, user_id: str, email: str) -> Optional[dict]:
-    """One unique single-use code per approved review. Event Pass exclusion is inherited
-    from the shared coupon engine, so nothing extra is configured here."""
-    settings = await review_settings()
-    if not settings["enabled"]:
-        return None
+async def issue_auto_coupon(prefix: str, percent_off: float, expiry_days: int, note: str,
+                            issued_to: Optional[str] = None, review_id: Optional[str] = None,
+                            excluded_categories: Optional[List[str]] = None) -> Optional[dict]:
+    """One unique single-use percent code. Event Pass exclusion is inherited from the shared
+    coupon engine, so nothing extra is configured here."""
     await sweep_auto_coupons()
-    expires_at = utc_now() + timedelta(days=int(settings["expiry_days"]))
+    expires_at = utc_now() + timedelta(days=int(expiry_days))
     for _ in range(5):
-        code = f"THANKS{secrets.token_hex(3).upper()}"
+        code = f"{prefix.upper()}{secrets.token_hex(3).upper()}"
         coupon = Coupon(
-            code=code, source="auto", review_id=review_id, order_id=None, issued_to=email,
-            discount_type="percent", percent_off=float(settings["percent_off"]),
+            code=code, source="auto", review_id=review_id, order_id=None, issued_to=issued_to,
+            discount_type="percent", percent_off=float(percent_off),
             one_per_customer=True, max_uses=1, expires_at=expires_at,
-            note="Thanks for your review",
+            excluded_categories=excluded_categories or [], note=note,
         )
         try:
             await db.coupons.insert_one(coupon.to_mongo())
         except DuplicateKeyError:
             continue
-        return {"code": code, "percent_off": float(settings["percent_off"]),
+        return {"code": code, "percent_off": float(percent_off),
                 "expires_at": expires_at.isoformat()}
-    logger.error("Could not generate a unique review coupon for %s", review_id)
+    logger.error("Could not generate a unique %s coupon", prefix)
     return None
+
+
+async def issue_review_coupon(review_id: str, user_id: str, email: str) -> Optional[dict]:
+    settings = await review_settings()
+    if not settings["enabled"]:
+        return None
+    return await issue_auto_coupon(
+        "THANKS", float(settings["percent_off"]), int(settings["expiry_days"]),
+        "Thanks for your review", issued_to=email, review_id=review_id,
+    )
 
 
 # ---------------- Reviews ----------------
@@ -2007,6 +2019,118 @@ async def analytics(admin: dict = Depends(get_admin_user)):
     }
 
 
+# ---------------- Popups ----------------
+PROMO_WAITLIST_ID = "promo_list"
+
+DEFAULT_POPUPS = [
+    {
+        "name": "Promo & drop alerts", "type": "email_capture", "enabled": True,
+        "title": "Get drop alerts & promos",
+        "body": "Be first to know when new drops go live, plus subscriber-only promo codes.",
+        "button_label": "Join", "dismiss_label": "Not now",
+        "collect_email": True, "collect_name": False,
+        "trigger": "delay", "delay_seconds": 10, "page_views": 2, "suppress_days": 14,
+        "paths": [], "waitlist_product_id": PROMO_WAITLIST_ID,
+    },
+    {
+        "name": "Abandoned checkout 5% off", "type": "discount_offer", "enabled": True,
+        "title": "Wait! Here's 5% off",
+        "body": "Finish your order with this code — it is good for the next 7 days.",
+        "button_label": "Apply & return to checkout", "dismiss_label": "No thanks",
+        "collect_email": False, "collect_name": False,
+        "trigger": "exit_checkout", "delay_seconds": 10, "page_views": 2, "suppress_days": 7,
+        "paths": [], "coupon_percent_off": 5, "coupon_prefix": "COMEBACK",
+        "coupon_expiry_days": 7, "coupon_excluded_categories": ["event_pass"],
+    },
+]
+
+
+def popup_view(doc: dict) -> dict:
+    popup = Popup.from_mongo(doc).model_dump()
+    popup["id"] = str(doc["_id"])
+    return popup
+
+
+async def seed_popups() -> None:
+    if await db.popups.count_documents({}):
+        return
+    for entry in DEFAULT_POPUPS:
+        await db.popups.insert_one(Popup(**entry).to_mongo())
+
+
+async def get_popup(popup_id: str) -> dict:
+    doc = await db.popups.find_one({"_id": oid(popup_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="That popup no longer exists")
+    return doc
+
+
+@api.get("/popups")
+async def list_active_popups():
+    docs = await db.popups.find({"enabled": True}).sort("created_at", 1).to_list(50)
+    return [popup_view(d) for d in docs]
+
+
+@api.post("/popups/{popup_id}/submit")
+async def submit_popup(popup_id: str, payload: PopupSubmission):
+    popup = await get_popup(popup_id)
+    product_id = popup.get("waitlist_product_id") or PROMO_WAITLIST_ID
+    await db.waitlist.update_one(
+        {"email": payload.email.lower(), "product_id": product_id},
+        {"$set": {"email": payload.email.lower(), "product_id": product_id,
+                  "name": payload.name.strip(), "source": "promo_popup",
+                  "note": popup.get("name", ""), "created_at": utc_now()}},
+        upsert=True,
+    )
+    return {"ok": True, "message": "You're on the list — watch your inbox."}
+
+
+@api.post("/popups/{popup_id}/offer")
+async def popup_offer(popup_id: str, user: Optional[dict] = Depends(get_optional_user)):
+    """Mints a real single-use code through the shared auto-coupon generator."""
+    popup = await get_popup(popup_id)
+    if popup.get("type") != "discount_offer":
+        raise HTTPException(status_code=400, detail="That popup does not carry an offer")
+    coupon = await issue_auto_coupon(
+        popup.get("coupon_prefix") or "COMEBACK",
+        float(popup.get("coupon_percent_off") or 5),
+        int(popup.get("coupon_expiry_days") or 7),
+        f"Popup offer: {popup.get('name', '')}",
+        excluded_categories=popup.get("coupon_excluded_categories") or ["event_pass"],
+    )
+    if not coupon:
+        raise HTTPException(status_code=500, detail="Could not generate a code, please try again")
+    return coupon
+
+
+@api.get("/admin/popups")
+async def admin_list_popups(admin: dict = Depends(get_admin_user)):
+    docs = await db.popups.find().sort("created_at", 1).to_list(50)
+    return [popup_view(d) for d in docs]
+
+
+@api.post("/admin/popups")
+async def admin_create_popup(payload: PopupIn, admin: dict = Depends(get_admin_user)):
+    popup = Popup(**payload.model_dump())
+    result = await db.popups.insert_one(popup.to_mongo())
+    return popup_view(await db.popups.find_one({"_id": result.inserted_id}))
+
+
+@api.put("/admin/popups/{popup_id}")
+async def admin_update_popup(popup_id: str, payload: PopupIn,
+                             admin: dict = Depends(get_admin_user)):
+    await get_popup(popup_id)
+    await db.popups.update_one({"_id": oid(popup_id)}, {"$set": payload.model_dump()})
+    return popup_view(await db.popups.find_one({"_id": oid(popup_id)}))
+
+
+@api.delete("/admin/popups/{popup_id}")
+async def admin_delete_popup(popup_id: str, admin: dict = Depends(get_admin_user)):
+    await get_popup(popup_id)
+    await db.popups.delete_one({"_id": oid(popup_id)})
+    return {"ok": True}
+
+
 # ---------------- Waitlist ----------------
 @api.post("/waitlist")
 async def join_waitlist(payload: WaitlistIn):
@@ -2024,7 +2148,8 @@ async def list_waitlist(admin: dict = Depends(get_admin_user)):
     docs = await db.waitlist.find().sort("created_at", -1).to_list(500)
     return [
         {"email": d["email"], "product_id": d.get("product_id"),
-         "note": d.get("note", ""), "created_at": d.get("created_at")}
+         "note": d.get("note", ""), "source": d.get("source", ""),
+         "created_at": d.get("created_at")}
         for d in docs
     ]
 
@@ -2107,6 +2232,7 @@ async def startup():
     await ensure_indexes()
     try:
         await seed_data()
+        await seed_popups()
     except Exception as exc:
         logger.error("Startup seeding skipped (database not writable?): %s", exc)
 

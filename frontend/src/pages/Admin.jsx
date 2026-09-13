@@ -6,6 +6,7 @@ import { CategoriesTab } from "@/components/admin/CategoriesTab";
 import { AffiliatesTab } from "@/components/admin/AffiliatesTab";
 import { LegalTab } from "@/components/admin/LegalTab";
 import { PayoutsTab } from "@/components/admin/PayoutsTab";
+import { PopupsTab } from "@/components/admin/PopupsTab";
 import { CouponsTab } from "@/components/admin/CouponsTab";
 import { OrdersTab } from "@/components/admin/OrdersTab";
 import { ProductsTab } from "@/components/admin/ProductsTab";
@@ -23,6 +24,7 @@ const TABS = [
   { key: "payouts", label: "payout requests" },
   { key: "affiliates", label: "promoters" },
   { key: "waitlist", label: "waitlist" },
+  { key: "popups", label: "popups" },
   { key: "settings", label: "settings & analytics" },
 ];
 
@@ -220,7 +222,10 @@ export default function Admin() {
     }
   };
 
-  const productName = (id) => products.find((p) => p.id === id)?.name || "General";
+  const productName = (id) =>
+    id === "promo_list"
+      ? "Promo list / specials"
+      : products.find((p) => p.id === id)?.name || "General";
   return (
     <div data-testid="admin-page" className="mx-auto max-w-[1400px] px-5 py-14 lg:px-10 lg:py-20">
       <p className="text-[10px] uppercase tracking-[0.3em] text-[#00ffcc]">// operator console</p>
@@ -295,6 +300,8 @@ export default function Admin() {
       {tab === "coupons" && <CouponsTab categories={categories} />}
 
       {tab === "waitlist" && <WaitlistTab waitlist={waitlist} productName={productName} />}
+
+      {tab === "popups" && <PopupsTab categories={categories} />}
 
       {tab === "settings" && (
         <SettingsTab banner={banner} setBanner={setBanner} bannerLoaded={bannerLoaded}
