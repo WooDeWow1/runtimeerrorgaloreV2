@@ -155,3 +155,9 @@ separately verified outbound domain (iCloud custom domains cannot do API sending
 ## 2026-06 Hero video thumbnail
 - Added /app/frontend/public/images/video-thumb.png (shattered-glass $99.99 -> $42.99 art).
 - Set as poster for the hero-card ExplainerVideo in Home.jsx; background loop video keeps Mainpage.jpg poster.
+
+## 2026-06 Admin payout method toggles
+- New settings doc _id "payout_methods"; defaults: cashapp OFF, btc/sol/ltc/usdc ON.
+- GET/PUT /api/admin/settings/payout-methods (admin only, must keep >=1 enabled).
+- /api/affiliate/me payout.methods now only returns enabled methods; POST /api/affiliate/payout rejects disabled methods.
+- UI: components/admin/PayoutMethodToggles.jsx rendered at top of PayoutsTab; PayoutDialog defaults to first enabled method.

@@ -51,6 +51,7 @@ from models import (  # noqa: E402
     PasswordChangeRequest,
     CodeChangeRequest,
     LegalUpdate,
+    PayoutMethodSettings,
     PayoutRequest,
     Product,
     ProductIn,
@@ -1046,6 +1047,14 @@ PAYOUT_METHODS = {
     "usdc": "USDC",
 }
 PAYOUT_FLOOR = 10.0
+# Cash App is off by default; admins turn methods on and off from the Payout Requests tab.
+PAYOUT_METHODS_DEFAULTS = {"cashapp": False, "btc": True, "sol": True, "ltc": True, "usdc": True}
+
+
+async def enabled_payout_methods() -> dict:
+    doc = await db.settings.find_one({"_id": "payout_methods"}) or {}
+    flags = {k: bool(doc.get(k, PAYOUT_METHODS_DEFAULTS[k])) for k in PAYOUT_METHODS}
+    return {k: PAYOUT_METHODS[k] for k, on in flags.items() if on}
 
 
 async def linked_customer_id(user: dict) -> Optional[int]:
@@ -1069,7 +1078,8 @@ async def linked_customer_id(user: dict) -> Optional[int]:
     return None
 
 
-def affiliate_view(detail: dict, tier: dict, shop: dict, user: Optional[dict] = None) -> dict:
+def affiliate_view(detail: dict, tier: dict, shop: dict, user: Optional[dict] = None,
+                   methods: Optional[dict] = None) -> dict:
     affiliate = detail.get("affiliate") or {}
     code = affiliate.get("affiliate_code") or ""
     open_request = next((p for p in detail.get("payout_requests") or []
@@ -1086,7 +1096,7 @@ def affiliate_view(detail: dict, tier: dict, shop: dict, user: Optional[dict] = 
         "payout": {
             "enabled": bool(shop.get("payouts_enabled")),
             "min_amount": max(PAYOUT_FLOOR, float(shop.get("payout_min_amount") or 0)),
-            "methods": PAYOUT_METHODS,
+            "methods": methods if methods is not None else PAYOUT_METHODS,
             "open_request": open_request,
         },
         "code_editable": bool(shop.get("code_editable")),
@@ -1108,7 +1118,7 @@ async def my_affiliate(user: dict = Depends(get_current_user)):
     except sellauth.SellAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    view = affiliate_view(detail or {}, tier, shop, user)
+    view = affiliate_view(detail or {}, tier, shop, user, await enabled_payout_methods())
     view["program_enabled"] = True
     return view
 
@@ -1128,7 +1138,7 @@ async def enroll_affiliate(user: dict = Depends(get_current_user)):
         customer_id = await linked_customer_id(user)
         detail = await sellauth_affiliate.get_affiliate(customer_id) if customer_id else None
         if detail and (detail.get("affiliate") or {}).get("affiliate_code"):
-            return affiliate_view(detail, tier, shop, user) | {"program_enabled": True}
+            return affiliate_view(detail, tier, shop, user, await enabled_payout_methods()) | {"program_enabled": True}
 
         code = sellauth_affiliate.new_code(user.get("name") or user["email"])
         try:
@@ -1150,6 +1160,24 @@ async def enroll_affiliate(user: dict = Depends(get_current_user)):
     return affiliate_view(detail or {}, tier, shop, user) | {"program_enabled": True}
 
 
+@api.get("/admin/settings/payout-methods")
+async def get_payout_methods(admin: dict = Depends(get_admin_user)):
+    doc = await db.settings.find_one({"_id": "payout_methods"}) or {}
+    return [{"key": k, "name": name, "enabled": bool(doc.get(k, PAYOUT_METHODS_DEFAULTS[k]))}
+            for k, name in PAYOUT_METHODS.items()]
+
+
+@api.put("/admin/settings/payout-methods")
+async def put_payout_methods(payload: PayoutMethodSettings, admin: dict = Depends(get_admin_user)):
+    if not any(payload.methods.values()):
+        raise HTTPException(status_code=400, detail="Keep at least one payout method enabled")
+    await db.settings.update_one({"_id": "payout_methods"},
+                                 {"$set": {k: bool(v) for k, v in payload.methods.items()}},
+                                 upsert=True)
+    return await get_payout_methods(admin)
+
+
+
 def payout_details_line(payload: PayoutRequest) -> str:
     label = PAYOUT_METHODS[payload.method]
     destination = payload.destination.strip()
@@ -1165,6 +1193,8 @@ async def request_affiliate_payout(payload: PayoutRequest, user: dict = Depends(
     """The payout is executed with a token minted for this user's own customer id, so a caller
     can never move another affiliate's balance."""
     details = payout_details_line(payload)
+    if payload.method not in await enabled_payout_methods():
+        raise HTTPException(status_code=400, detail="That payout method is not available right now")
     try:
         shop = await sellauth_affiliate.settings()
         minimum = max(PAYOUT_FLOOR, float(shop.get("payout_min_amount") or 0))

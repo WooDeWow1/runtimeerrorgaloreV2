@@ -6,7 +6,7 @@ import { api, apiError, money } from "@/lib/api";
 
 export const PayoutDialog = ({ open, onOpenChange, balance, minimum, methods, onDone }) => {
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("cashapp");
+  const [method, setMethod] = useState(Object.keys(methods)[0] || "");
   const [destination, setDestination] = useState("");
   const [chain, setChain] = useState("Solana");
   const [busy, setBusy] = useState(false);

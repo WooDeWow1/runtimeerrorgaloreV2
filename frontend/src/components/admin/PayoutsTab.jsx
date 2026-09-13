@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BadgeCheck, Wallet } from "lucide-react";
+import { PayoutMethodToggles } from "@/components/admin/PayoutMethodToggles";
 import { toast } from "sonner";
 
 import { api, apiError, money } from "@/lib/api";
@@ -40,7 +41,8 @@ export const PayoutsTab = () => {
 
   return (
     <div data-testid="payouts-tab" className="mt-10">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <PayoutMethodToggles />
+      <div className="mt-10 flex flex-wrap items-center justify-between gap-4">
         <p className="text-[10px] leading-relaxed text-zinc-600">
           Pending affiliate payout requests from SellAuth. Pay the person by hand, then clear the
           request here.

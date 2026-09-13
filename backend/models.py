@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
@@ -234,6 +234,10 @@ class PayoutRequest(BaseModel):
     method: Literal["cashapp", "btc", "sol", "ltc", "usdc"]
     destination: str = Field(min_length=3, max_length=200)
     chain: str = Field(default="", max_length=40)
+
+
+class PayoutMethodSettings(BaseModel):
+    methods: Dict[Literal["cashapp", "btc", "sol", "ltc", "usdc"], bool]
 
 
 class Order(BaseDocument):
