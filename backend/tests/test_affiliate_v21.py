@@ -65,14 +65,18 @@ class TestAffiliateMe:
         for key in ("is_affiliate", "code", "link", "balance", "lifetime_earnings",
                     "referrals_count", "commission", "payout", "attribution_window_days"):
             assert key in d, f"missing {key}"
-        assert d["attribution_window_days"] == 30
+        # window is configured in SellAuth, so assert the shape, not a value
+        aw = d["attribution_window_days"]
+        assert isinstance(aw, int) and not isinstance(aw, bool), aw
+        assert aw > 0, aw
         c = d["commission"]
-        for k in ("min_percent", "max_percent", "excluded_products",
+        for k in ("base_percent", "min_percent", "max_percent", "excluded_products",
                   "buyer_discount_percent", "tier_id"):
             assert k in c, f"commission missing {k}"
-        # range 0-10 per spec
+        # min is the lowest per-product override. max must never fall below the
+        # tier base, which is what the old 0-10 range got wrong. Rate-change safe.
         assert c["min_percent"] == 0
-        assert c["max_percent"] <= 10
+        assert c["max_percent"] >= c["base_percent"]
         # Event Passes named as 0%
         assert any("event" in p.lower() or "pass" in p.lower() for p in c["excluded_products"]), c["excluded_products"]
         assert c["tier_id"] == 622

@@ -87,9 +87,9 @@ export const ReferEarn = () => {
             <span className="text-[#00ffcc]">
               {c.min_percent}% – {c.max_percent}%
             </span>{" "}
-            commission on everything your referrals buy, for {data.attribution_window_days} days
-            after they click.
-            {c.excluded_products?.length ? " Event Passes and bundle tickets earn 0%." : ""}
+            commission on every order your referrals place. No minimum order. No cap
+            on what you can earn.
+            {c.excluded_products?.length ? " Event Passes earn 0%." : ""}
           </p>
         </div>
         {data.is_affiliate && data.payout?.enabled && (

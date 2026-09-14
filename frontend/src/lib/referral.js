@@ -1,7 +1,7 @@
 const KEY = "pokecoins_ref";
-const WINDOW_DAYS = 30;
+const WINDOW_DAYS = 365;
 
-// A referral is captured from ?ref= and kept for the shop's 30 day attribution window, so a
+// A referral is captured from ?ref= and kept for the shop's 365 day attribution window, so a
 // visitor who comes back later still credits the promoter who sent them.
 export const captureRef = () => {
   const code = new URLSearchParams(window.location.search).get("ref");

@@ -51,17 +51,19 @@ async def default_tier() -> dict:
 
 def commission_range(tier: dict) -> dict:
     """A flat headline rate would be a lie: per-product overrides run from 0% (Event Passes)
-    up to 10%, so the panel shows the range and names what earns nothing."""
+    up to the tier base, so the panel shows the range and names what earns nothing.
+    max_percent must include the tier base commission -- any product without an
+    override earns it -- while min_percent is the lowest override."""
     base = float(tier.get("percentage") or 0)
     overrides = [float(p["pivot"]["percentage"]) for p in tier.get("products") or []
                  if p.get("pivot") is not None]
     rates = overrides or [base]
     excluded = [p["name"] for p in tier.get("products") or []
-                if float(p["pivot"]["percentage"]) == 0]
+                if p.get("pivot") is not None and float(p["pivot"]["percentage"]) == 0]
     return {
         "base_percent": base,
         "min_percent": min(rates),
-        "max_percent": max(rates),
+        "max_percent": max([base] + overrides) if overrides else base,
         "excluded_products": excluded,
         "buyer_discount_percent": float(tier.get("discount_percentage") or 0),
         "tier_id": tier.get("id"),
